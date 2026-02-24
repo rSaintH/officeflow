@@ -1,0 +1,180 @@
+import { ReactNode, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
+import { useAuth } from "@/lib/auth";
+import { useTheme } from "@/contexts/ThemeContext";
+import {
+  Building2,
+  Home,
+  Users,
+  FileText,
+  ClipboardList,
+  FileSpreadsheet,
+  FolderSearch,
+  Settings,
+  LogOut,
+  Menu,
+  ChevronRight,
+  ArrowLeftToLine,
+  ArrowRightFromLine,
+  Sparkles,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import ThemeToggle from "@/components/ThemeToggle";
+
+const navItems = [
+  { path: "/", label: "Início", icon: Home },
+  { path: "/clients", label: "Clientes", icon: Users },
+  { path: "/pops", label: "POPs", icon: FileText },
+  { path: "/tasks", label: "Pendências", icon: ClipboardList },
+  { path: "/reinf", label: "EFD-REINF", icon: FileSpreadsheet },
+  { path: "/documents", label: "Documentos", icon: FolderSearch },
+];
+
+const adminItems = [
+  { path: "/admin", label: "Administração", icon: Settings },
+];
+
+export default function AppLayout({ children }: { children: ReactNode }) {
+  const { user, isAdmin, signOut } = useAuth();
+  const { easterEggUnlocked } = useTheme();
+  const location = useLocation();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    return localStorage.getItem("sidebarCollapsed") === "true";
+  });
+
+  const toggleCollapsed = () => {
+    setSidebarCollapsed((prev) => {
+      localStorage.setItem("sidebarCollapsed", String(!prev));
+      return !prev;
+    });
+  };
+
+  const easterEggItems = easterEggUnlocked
+    ? [{ path: "/customization", label: "Customização", icon: Sparkles }]
+    : [];
+
+  const allItems = [...navItems, ...(isAdmin ? adminItems : []), ...easterEggItems];
+
+  return (
+    <div className="flex h-screen overflow-hidden">
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-foreground/20 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* Sidebar */}
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-40 flex flex-col bg-sidebar text-sidebar-foreground transition-all duration-300 ease-in-out",
+          // Mobile
+          sidebarOpen ? "translate-x-0 w-60" : "-translate-x-full w-60",
+          // Desktop
+          "lg:static lg:translate-x-0",
+          sidebarCollapsed ? "lg:w-0 lg:overflow-hidden" : "lg:w-64"
+        )}
+      >
+        <div className="flex h-14 items-center gap-2 px-4 border-b border-sidebar-border justify-between">
+          <div className="flex items-center gap-2">
+            <Building2 className="h-6 w-6 text-sidebar-primary flex-shrink-0" />
+            <span className="font-bold text-lg text-sidebar-accent-foreground whitespace-nowrap">ContaOffice</span>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="hidden lg:flex text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent h-8 w-8"
+            onClick={toggleCollapsed}
+          >
+            <ArrowLeftToLine className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-1">
+          {allItems.map((item) => {
+            const active = location.pathname === item.path ||
+              (item.path !== "/" && location.pathname.startsWith(item.path));
+            return (
+              <Link
+                key={item.path}
+                to={item.path}
+                onClick={() => setSidebarOpen(false)}
+                className={cn(
+                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                  active
+                    ? "bg-sidebar-accent text-sidebar-primary"
+                    : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                )}
+              >
+                <item.icon className="h-4 w-4 flex-shrink-0" />
+                {item.label}
+                {active && <ChevronRight className="h-3 w-3 ml-auto" />}
+              </Link>
+            );
+          })}
+        </nav>
+
+        <div className="border-t border-sidebar-border p-3">
+          <div className="flex items-center gap-2 px-2 mb-2">
+            <div className="h-7 w-7 rounded-full bg-sidebar-accent flex items-center justify-center text-xs font-bold text-sidebar-primary flex-shrink-0">
+              {user?.email?.[0]?.toUpperCase() || "U"}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium truncate text-sidebar-accent-foreground">
+                {user?.email}
+              </p>
+              <p className="text-[10px] text-sidebar-muted">
+                {isAdmin ? "Admin" : "Colaborador"}
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent"
+            onClick={signOut}
+          >
+            <LogOut className="h-4 w-4 mr-2" />
+            Sair
+          </Button>
+        </div>
+      </aside>
+
+      {/* Main content */}
+      <div
+        className={cn(
+          "flex-1 flex flex-col overflow-hidden transition-all duration-300 ease-in-out"
+        )}
+      >
+        <header className="flex h-14 items-center gap-3 border-b bg-card px-4 lg:px-6">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="lg:hidden"
+            onClick={() => setSidebarOpen(true)}
+          >
+            <Menu className="h-5 w-5" />
+          </Button>
+          {sidebarCollapsed && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="hidden lg:flex"
+              onClick={toggleCollapsed}
+            >
+              <ArrowRightFromLine className="h-5 w-5" />
+            </Button>
+          )}
+          <div className="flex-1" />
+          <ThemeToggle />
+        </header>
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+          {children}
+        </main>
+      </div>
+    </div>
+  );
+}
