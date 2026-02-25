@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
-import { useClients, useSectors } from "@/hooks/useSupabaseQuery";
+import { useClients, useSectors, usePermissionSettings } from "@/hooks/useSupabaseQuery";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -125,9 +125,10 @@ function getMesFiscalUser(entry: ReinfEntry, mes: number): string | null {
 }
 
 export default function Reinf() {
-  const { user, isAdmin, userSectorId } = useAuth();
+  const { user, isAdmin, userRole, userSectorId } = useAuth();
   const { data: clients } = useClients();
   const { data: sectors } = useSectors();
+  const { data: permissionSettings } = usePermissionSettings();
   const [entries, setEntries] = useState<ReinfEntry[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [logs, setLogs] = useState<ReinfLog[]>([]);
@@ -137,6 +138,10 @@ export default function Reinf() {
   const canContabil = isAdmin || userSectorName.includes("contab");
   const canDP = isAdmin || userSectorName.includes("dp") || userSectorName.includes("folha") || userSectorName.includes("pessoal");
   const canFiscal = isAdmin || userSectorName.includes("fiscal");
+
+  // Permission-based: who can fill profits
+  const reinfProfitsPerm = permissionSettings?.find((p: any) => p.key === "reinf_fill_profits");
+  const canFillProfits = reinfProfitsPerm ? (reinfProfitsPerm.allowed_roles || []).includes(userRole) : canContabil;
 
   const currentYear = new Date().getFullYear();
   const currentQuarter = Math.ceil((new Date().getMonth() + 1) / 3);
@@ -546,7 +551,7 @@ export default function Reinf() {
             <SelectContent>{[1, 2, 3, 4].map((t) => <SelectItem key={t} value={t.toString()}>{TRIMESTRE_LABELS[t]}</SelectItem>)}</SelectContent>
           </Select>
         </div>
-        {canContabil &&
+        {canFillProfits &&
         <div className="ml-auto">
             <Button size="sm" onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" /> Nova Entrada</Button>
           </div>
@@ -725,7 +730,7 @@ export default function Reinf() {
                           {/* Lucro value */}
                           <div className="flex items-center justify-between">
                             <span className="text-lg font-bold">{formatCurrency(lucro || 0)}</span>
-                            {mesStatus === "pendente_contabil" && canContabil &&
+                            {mesStatus === "pendente_contabil" && canFillProfits &&
                           <Button variant="ghost" size="icon" className="h-7 w-7" title={`Editar ${meses[mesNum - 1]}`} onClick={() => openEditDialog(entry, mesNum)}>
                                 <Pencil className="h-3.5 w-3.5" />
                               </Button>
@@ -755,7 +760,7 @@ export default function Reinf() {
 
                           {/* Action buttons — pushed to bottom (no fiscal here, it's quarterly) */}
                           <div className="flex flex-wrap gap-1 pt-2 mt-auto border-t">
-                            {mesStatus === "pendente_contabil" && canContabil &&
+                            {mesStatus === "pendente_contabil" && canFillProfits &&
                           <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => requestConfirmation(entry, mesNum, "advance")} disabled={!lucro}>
                                 <Send className="h-3 w-3 mr-1" /> Enviar p/ DP
                               </Button>

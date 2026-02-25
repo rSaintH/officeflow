@@ -1,4 +1,8 @@
-import { useParams, Link } from "react-router-dom";
+import { useEffect } from "react";
+import { useParams, Link, Navigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/lib/auth";
 import {
   useClient,
   useClientParticularities,
@@ -8,6 +12,7 @@ import {
   useSectors,
   useClientTags,
   useParameterOptions,
+  usePermissionSettings,
 } from "@/hooks/useSupabaseQuery";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -30,8 +35,6 @@ import {
 import { isPast, isToday } from "date-fns";
 import { useState, useMemo, useCallback } from "react";
 import { getPriorityBadgeClass, CLOSED_TASK_STATUSES } from "@/lib/constants";
-import { supabase } from "@/integrations/supabase/client";
-import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import {
   AlertDialog,
@@ -54,7 +57,11 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 
 export default function ClientSectorView() {
+  const { userRole, userSectorId } = useAuth();
+  const canManageParticularities = userRole === "admin" || userRole === "supervisao";
+  const queryClient = useQueryClient();
   const { id, sectorId } = useParams<{ id: string; sectorId: string }>();
+  const { data: permissionSettings } = usePermissionSettings();
   const { data: client, isLoading } = useClient(id!);
   const { data: clientTags } = useClientTags(id!);
   const { data: particularities } = useClientParticularities(id!);
@@ -63,6 +70,17 @@ export default function ClientSectorView() {
   const { data: occurrences } = useOccurrencesWithComments(id);
   const { data: sectors } = useSectors();
   const { data: taskStatuses } = useParameterOptions("task_status");
+
+  // Realtime: atualiza pendências quando outro usuário faz mudanças
+  useEffect(() => {
+    const channel = supabase
+      .channel("tasks-realtime-client")
+      .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => {
+        queryClient.invalidateQueries({ queryKey: ["tasks_with_comments"] });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [queryClient]);
 
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [showParticularityForm, setShowParticularityForm] = useState(false);
@@ -74,8 +92,18 @@ export default function ClientSectorView() {
   const [taskStatusFilter, setTaskStatusFilter] = useState("open");
   const [taskViewMode, setTaskViewMode] = useState<"list" | "columns">("list");
   const [occViewMode, setOccViewMode] = useState<"list" | "columns">("list");
-  const queryClient = useQueryClient();
   const { toast } = useToast();
+  const restrictSectors = permissionSettings?.find((p: any) => p.key === "restrict_collaborator_sectors");
+  const isRestrictedCollaborator = Boolean(
+    restrictSectors?.enabled && userRole === "colaborador" && userSectorId
+  );
+
+  if (isRestrictedCollaborator && userSectorId && sectorId !== userSectorId) {
+    return <Navigate to={`/clients/${id}/sector/${userSectorId}`} replace />;
+  }
+
+  const currentSectorId = isRestrictedCollaborator && userSectorId ? userSectorId : sectorId;
+  const backHref = isRestrictedCollaborator ? "/clients" : `/clients/${id}`;
 
   const handleDeletePop = useCallback(async () => {
     if (!deletingPopId) return;
@@ -107,18 +135,18 @@ export default function ClientSectorView() {
   );
 
   const sectorTags = useMemo(
-    () => clientTags?.filter((ct: any) => ct.sector_id === sectorId) || [],
-    [clientTags, sectorId]
+    () => clientTags?.filter((ct: any) => ct.sector_id === currentSectorId) || [],
+    [clientTags, currentSectorId]
   );
 
   const sectorParticularities = useMemo(
-    () => particularities?.filter((p: any) => p.sector_id === sectorId) || [],
-    [particularities, sectorId]
+    () => particularities?.filter((p: any) => p.sector_id === currentSectorId) || [],
+    [particularities, currentSectorId]
   );
   const sectorPops = useMemo(
     () =>
       pops?.filter((p: any) => {
-        if (p.sector_id !== sectorId) return false;
+        if (p.sector_id !== currentSectorId) return false;
         if (p.scope === "Geral") return true;
         if (p.scope === "Cliente" && p.client_id === id) return true;
         if (p.scope === "Tag") {
@@ -126,11 +154,11 @@ export default function ClientSectorView() {
         }
         return false;
       }) || [],
-    [pops, sectorId, id, clientTagIds]
+    [pops, currentSectorId, id, clientTagIds]
   );
   const sectorTasks = useMemo(
-    () => tasks?.filter((t: any) => t.sector_id === sectorId) || [],
-    [tasks, sectorId]
+    () => tasks?.filter((t: any) => t.sector_id === currentSectorId) || [],
+    [tasks, currentSectorId]
   );
   const filteredTasks = useMemo(() => {
     if (taskStatusFilter === "open") return sectorTasks.filter((t: any) => !CLOSED_TASK_STATUSES.includes(t.status));
@@ -139,12 +167,12 @@ export default function ClientSectorView() {
     return sectorTasks;
   }, [sectorTasks, taskStatusFilter]);
   const sectorOccurrences = useMemo(
-    () => occurrences?.filter((o: any) => o.sector_id === sectorId) || [],
-    [occurrences, sectorId]
+    () => occurrences?.filter((o: any) => o.sector_id === currentSectorId) || [],
+    [occurrences, currentSectorId]
   );
 
   const openTasks = sectorTasks.filter((t: any) => !CLOSED_TASK_STATUSES.includes(t.status as any));
-  const sectorName = sectors?.find((s: any) => s.id === sectorId)?.name || "";
+  const sectorName = sectors?.find((s: any) => s.id === currentSectorId)?.name || "";
 
   if (isLoading) {
     return (
@@ -166,7 +194,7 @@ export default function ClientSectorView() {
   return (
     <div className="space-y-4 animate-fade-in">
       <div className="flex items-center gap-2">
-        <Link to={`/clients/${id}`}>
+        <Link to={backHref}>
           <Button variant="ghost" size="icon"><ArrowLeft className="h-4 w-4" /></Button>
         </Link>
         <div className="flex-1">
@@ -230,14 +258,16 @@ export default function ClientSectorView() {
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       <Badge className={`${getPriorityBadgeClass(p.priority)} text-xs`}>{p.priority}</Badge>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                        onClick={() => setDeletingParticularityId(p.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      {canManageParticularities && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          onClick={() => setDeletingParticularityId(p.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                   {p.details && <p className="text-sm text-muted-foreground mt-2">{p.details}</p>}
@@ -429,11 +459,11 @@ export default function ClientSectorView() {
         </TabsContent>
       </Tabs>
 
-      {showTaskForm && <TaskFormDialog open={showTaskForm} onClose={() => setShowTaskForm(false)} clientId={id!} sectorId={sectorId!} />}
-      {showParticularityForm && <ParticularityFormDialog open={showParticularityForm} onClose={() => setShowParticularityForm(false)} clientId={id!} sectorId={sectorId!} />}
-      {showOccurrenceForm && <OccurrenceFormDialog open={showOccurrenceForm} onClose={() => setShowOccurrenceForm(false)} clientId={id!} sectorId={sectorId!} />}
+      {showTaskForm && <TaskFormDialog open={showTaskForm} onClose={() => setShowTaskForm(false)} clientId={id!} sectorId={currentSectorId!} />}
+      {showParticularityForm && <ParticularityFormDialog open={showParticularityForm} onClose={() => setShowParticularityForm(false)} clientId={id!} sectorId={currentSectorId!} />}
+      {showOccurrenceForm && <OccurrenceFormDialog open={showOccurrenceForm} onClose={() => setShowOccurrenceForm(false)} clientId={id!} sectorId={currentSectorId!} />}
       {viewPop && <PopViewDialog open={!!viewPop} onClose={() => setViewPop(null)} pop={viewPop} clientId={id} />}
-      {showPopForm && <PopFormDialog open={showPopForm} onClose={() => setShowPopForm(false)} pop={{ sector_id: sectorId, client_id: id, scope: "Cliente" }} />}
+      {showPopForm && <PopFormDialog open={showPopForm} onClose={() => setShowPopForm(false)} pop={{ sector_id: currentSectorId, client_id: id, scope: "Cliente" }} />}
 
       <AlertDialog open={!!deletingPopId} onOpenChange={(open) => !open && setDeletingPopId(null)}>
         <AlertDialogContent>

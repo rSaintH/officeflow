@@ -1,5 +1,5 @@
-import { useParams, Link } from "react-router-dom";
-import { useClient, useClientSectorStyles, useSectors, useClientTags } from "@/hooks/useSupabaseQuery";
+import { useParams, Link, Navigate } from "react-router-dom";
+import { useClient, useClientSectorStyles, useSectors, useClientTags, usePermissionSettings } from "@/hooks/useSupabaseQuery";
 import { useAuth } from "@/lib/auth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -10,12 +10,20 @@ import ClientFormDialog from "@/components/ClientFormDialog";
 
 export default function ClientDetail() {
   const { id } = useParams<{ id: string }>();
-  const { isAdmin } = useAuth();
+  const { isAdmin, userRole, userSectorId } = useAuth();
   const { data: client, isLoading } = useClient(id!);
   const { data: sectors } = useSectors();
   const { data: clientStyles } = useClientSectorStyles(id!);
   const { data: clientTags } = useClientTags(id!);
+  const { data: permissionSettings } = usePermissionSettings();
   const [showEditClient, setShowEditClient] = useState(false);
+
+  // Check if collaborators should be restricted to their sector
+  const restrictSectors = permissionSettings?.find((p: any) => p.key === "restrict_collaborator_sectors");
+  const shouldRedirect = restrictSectors?.enabled && userRole === "colaborador" && userSectorId;
+  if (shouldRedirect) {
+    return <Navigate to={`/clients/${id}/sector/${userSectorId}`} replace />;
+  }
 
   if (isLoading) {
     return (

@@ -72,6 +72,7 @@ export default function PopFormDialog({ open, onClose, pop }: Props) {
         if (error) throw error;
       }
       queryClient.invalidateQueries({ queryKey: ["pops"] });
+      queryClient.invalidateQueries({ queryKey: ["pops", "client"] });
       toast({ title: pop ? "POP atualizado!" : "POP criado!" });
       onClose();
     } catch (err: any) {

@@ -74,6 +74,7 @@ export default function TaskFormDialog({ open, onClose, clientId, sectorId: init
         if (error) throw error;
       }
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      queryClient.invalidateQueries({ queryKey: ["tasks_with_comments"] });
       queryClient.invalidateQueries({ queryKey: ["task_stats"] });
       toast({ title: task ? "Pendência atualizada!" : "Pendência criada!" });
       onClose();

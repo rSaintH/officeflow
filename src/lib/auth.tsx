@@ -6,6 +6,7 @@ interface AuthContextType {
   user: User | null;
   session: Session | null;
   isAdmin: boolean;
+  userRole: string;
   userSectorId: string | null;
   mustChangePassword: boolean;
   loading: boolean;
@@ -21,6 +22,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [userRole, setUserRole] = useState<string>("colaborador");
   const [userSectorId, setUserSectorId] = useState<string | null>(null);
   const [mustChangePassword, setMustChangePassword] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -29,17 +31,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let isMounted = true;
     let initialized = false;
 
-    const checkAdminRole = async (userId: string) => {
+    const checkUserRole = async (userId: string) => {
       try {
         const { data } = await supabase
           .from("user_roles")
           .select("role")
           .eq("user_id", userId)
-          .eq("role", "admin")
           .maybeSingle();
-        if (isMounted) setIsAdmin(!!data);
+        if (isMounted) {
+          const role = data?.role || "colaborador";
+          setUserRole(role);
+          setIsAdmin(role === "admin");
+        }
       } catch {
-        if (isMounted) setIsAdmin(false);
+        if (isMounted) {
+          setUserRole("colaborador");
+          setIsAdmin(false);
+        }
       }
     };
 
@@ -72,12 +80,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (session?.user) {
           setTimeout(() => {
             if (isMounted) {
-              checkAdminRole(session.user.id);
+              checkUserRole(session.user.id);
               fetchUserProfile(session.user.id);
             }
           }, 0);
         } else {
           setIsAdmin(false);
+          setUserRole("colaborador");
           setUserSectorId(null);
           setMustChangePassword(false);
         }
@@ -94,7 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(session?.user ?? null);
 
         if (session?.user) {
-          await checkAdminRole(session.user.id);
+          await checkUserRole(session.user.id);
           await fetchUserProfile(session.user.id);
         }
       } catch (e) {
@@ -103,6 +112,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setSession(null);
           setUser(null);
           setIsAdmin(false);
+          setUserRole("colaborador");
           setUserSectorId(null);
           setMustChangePassword(false);
         }
@@ -161,13 +171,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setSession(null);
     setIsAdmin(false);
+    setUserRole("colaborador");
     setUserSectorId(null);
     setMustChangePassword(false);
   };
 
   const contextValue = useMemo(
-    () => ({ user, session, isAdmin, userSectorId, mustChangePassword, loading, signIn, signUp, signOut, setMustChangePassword }),
-    [user, session, isAdmin, userSectorId, mustChangePassword, loading]
+    () => ({ user, session, isAdmin, userRole, userSectorId, mustChangePassword, loading, signIn, signUp, signOut, setMustChangePassword }),
+    [user, session, isAdmin, userRole, userSectorId, mustChangePassword, loading]
   );
 
   return (

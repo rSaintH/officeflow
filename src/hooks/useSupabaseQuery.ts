@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/lib/auth";
 
 const STALE_5MIN = 5 * 60 * 1000;
 
@@ -38,17 +39,41 @@ export function useSections(sectorId?: string) {
 }
 
 export function useClients() {
+  const { user } = useAuth();
+
   return useQuery({
-    queryKey: ["clients"],
+    queryKey: ["clients", user?.id ?? "anon"],
     staleTime: STALE_5MIN,
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data: clients, error } = await supabase
         .from("clients")
         .select("*")
         .eq("is_archived", false)
         .order("legal_name");
       if (error) throw error;
-      return data;
+
+      const baseClients = clients || [];
+      if (!user?.id || baseClients.length === 0) {
+        return baseClients.map((client) => ({ ...client, is_favorite: false }));
+      }
+
+      const { data: favoriteRows, error: favoritesError } = await supabase
+        .from("client_favorites" as any)
+        .select("client_id")
+        .eq("user_id", user.id);
+      if (favoritesError) throw favoritesError;
+
+      const favoriteIds = new Set((favoriteRows || []).map((row: any) => row.client_id));
+
+      return baseClients
+        .map((client) => ({
+          ...client,
+          is_favorite: favoriteIds.has(client.id),
+        }))
+        .sort((a, b) => {
+          if (a.is_favorite !== b.is_favorite) return a.is_favorite ? -1 : 1;
+          return a.legal_name.localeCompare(b.legal_name, "pt-BR", { sensitivity: "base" });
+        });
     },
   });
 }
@@ -369,6 +394,20 @@ export function useClientPopNote(clientId: string, popId: string) {
       return data;
     },
     enabled: !!clientId && !!popId,
+  });
+}
+
+export function usePermissionSettings() {
+  return useQuery({
+    queryKey: ["permission_settings"],
+    staleTime: STALE_5MIN,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("permission_settings")
+        .select("*");
+      if (error) throw error;
+      return data;
+    },
   });
 }
 

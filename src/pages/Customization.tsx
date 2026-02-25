@@ -1,9 +1,14 @@
+import { useEffect, useMemo, useState } from "react";
 import { useTheme, DEFAULT_PALETTE, type ColorPalette } from "@/contexts/ThemeContext";
+import { useAuth } from "@/lib/auth";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { RotateCcw, Sparkles } from "lucide-react";
+import { RotateCcw, Save, Sparkles, Trash2 } from "lucide-react";
 
 const PALETTE_LABELS: Record<keyof ColorPalette, string> = {
   background: "Fundo",
@@ -109,10 +114,86 @@ const PRESET_PALETTES: { name: string; palette: ColorPalette }[] = [
       border: "#f48fb1",
     },
   },
+  {
+    name: "Gremio Doente",
+    palette: {
+      background: "#e6f6ff",
+      foreground: "#05070a",
+      primary: "#00a3e0",
+      card: "#ffffff",
+      accent: "#c9ebff",
+      sidebarBackground: "#000000",
+      sidebarForeground: "#eaf7ff",
+      sidebarPrimary: "#00a3e0",
+      sidebarAccent: "#101820",
+      border: "#7fcdf3",
+    },
+  },
 ];
 
+interface SavedPalette {
+  id: string;
+  name: string;
+  palette: ColorPalette;
+  created_at: string;
+  updated_at: string;
+}
+
+function normalizePalette(value: unknown): ColorPalette {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return DEFAULT_PALETTE;
+  return { ...DEFAULT_PALETTE, ...(value as Partial<ColorPalette>) };
+}
+
 export default function Customization() {
+  const { user } = useAuth();
+  const { toast } = useToast();
   const { palette, setPalette, paletteActive, setPaletteActive, shadowsDisabled, setShadowsDisabled } = useTheme();
+  const [savedPalettes, setSavedPalettes] = useState<SavedPalette[]>([]);
+  const [savedPaletteName, setSavedPaletteName] = useState("");
+  const [loadingSavedPalettes, setLoadingSavedPalettes] = useState(false);
+  const [savingCurrentPalette, setSavingCurrentPalette] = useState(false);
+  const [deletingPaletteId, setDeletingPaletteId] = useState<string | null>(null);
+
+  const remainingSlots = useMemo(() => Math.max(0, 3 - savedPalettes.length), [savedPalettes.length]);
+
+  const fetchSavedPalettes = async () => {
+    if (!user?.id) {
+      setSavedPalettes([]);
+      return;
+    }
+
+    setLoadingSavedPalettes(true);
+    const { data, error } = await supabase
+      .from("user_palettes" as any)
+      .select("id, name, palette, created_at, updated_at")
+      .eq("user_id", user.id)
+      .order("updated_at", { ascending: false });
+
+    if (error) {
+      toast({
+        title: "Erro",
+        description: error.message,
+        variant: "destructive",
+      });
+      setLoadingSavedPalettes(false);
+      return;
+    }
+
+    const mapped: SavedPalette[] = (data || []).map((item: any) => ({
+      id: item.id,
+      name: item.name,
+      palette: normalizePalette(item.palette),
+      created_at: item.created_at,
+      updated_at: item.updated_at,
+    }));
+
+    setSavedPalettes(mapped);
+    setLoadingSavedPalettes(false);
+  };
+
+  useEffect(() => {
+    fetchSavedPalettes();
+  }, [user?.id]);
 
   const handleColorChange = (key: keyof ColorPalette, value: string) => {
     setPalette({ ...palette, [key]: value });
@@ -125,6 +206,97 @@ export default function Customization() {
   const handlePreset = (preset: ColorPalette) => {
     setPalette(preset);
     if (!paletteActive) setPaletteActive(true);
+  };
+
+  const handleSaveCurrentPalette = async () => {
+    if (!user?.id) {
+      toast({
+        title: "Erro",
+        description: "Usuario nao autenticado.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const name = savedPaletteName.trim();
+    if (!name) {
+      toast({
+        title: "Nome obrigatorio",
+        description: "Informe um nome para salvar a paleta.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSavingCurrentPalette(true);
+    try {
+      const existing = savedPalettes.find((p) => p.name.toLowerCase() === name.toLowerCase());
+
+      if (existing) {
+        const { error } = await supabase
+          .from("user_palettes" as any)
+          .update({ palette, updated_at: new Date().toISOString() })
+          .eq("id", existing.id)
+          .eq("user_id", user.id);
+        if (error) throw error;
+        toast({ title: "Paleta atualizada!" });
+      } else {
+        if (savedPalettes.length >= 3) {
+          toast({
+            title: "Limite atingido",
+            description: "Cada usuario pode salvar no maximo 3 paletas.",
+            variant: "destructive",
+          });
+          return;
+        }
+
+        const { error } = await supabase
+          .from("user_palettes" as any)
+          .insert({ user_id: user.id, name, palette });
+        if (error) throw error;
+        toast({ title: "Paleta salva!" });
+      }
+
+      setSavedPaletteName("");
+      await fetchSavedPalettes();
+    } catch (err: any) {
+      toast({
+        title: "Erro ao salvar",
+        description: err.message || "Nao foi possivel salvar a paleta.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingCurrentPalette(false);
+    }
+  };
+
+  const handleApplySavedPalette = (saved: SavedPalette) => {
+    setPalette(saved.palette);
+    if (!paletteActive) setPaletteActive(true);
+  };
+
+  const handleDeleteSavedPalette = async (id: string) => {
+    if (!user?.id) return;
+    setDeletingPaletteId(id);
+    try {
+      const { error } = await supabase
+        .from("user_palettes" as any)
+        .delete()
+        .eq("id", id)
+        .eq("user_id", user.id);
+      if (error) throw error;
+
+      setSavedPalettes((prev) => prev.filter((p) => p.id !== id));
+      toast({ title: "Paleta removida." });
+    } catch (err: any) {
+      toast({
+        title: "Erro ao remover",
+        description: err.message || "Nao foi possivel remover a paleta.",
+        variant: "destructive",
+      });
+    } finally {
+      setDeletingPaletteId(null);
+    }
   };
 
   return (
@@ -212,6 +384,77 @@ export default function Customization() {
               </button>
             ))}
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Saved palettes */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Paletas Salvas</CardTitle>
+          <CardDescription>Salve ate 3 paletas na sua conta para acessar de qualquer lugar.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="space-y-1 min-w-[220px] flex-1">
+              <Label htmlFor="saved-palette-name">Nome da paleta</Label>
+              <Input
+                id="saved-palette-name"
+                placeholder="Ex: Fiscal clean"
+                value={savedPaletteName}
+                onChange={(e) => setSavedPaletteName(e.target.value)}
+                maxLength={60}
+              />
+            </div>
+            <Button onClick={handleSaveCurrentPalette} disabled={savingCurrentPalette || !user}>
+              <Save className="h-4 w-4 mr-2" />
+              {savingCurrentPalette ? "Salvando..." : "Salvar paleta atual"}
+            </Button>
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            Limite por usuario: 3 paletas. Vagas restantes: {remainingSlots}.
+          </p>
+
+          {loadingSavedPalettes ? (
+            <p className="text-sm text-muted-foreground">Carregando paletas salvas...</p>
+          ) : savedPalettes.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nenhuma paleta salva.</p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {savedPalettes.map((saved) => (
+                <div key={saved.id} className="rounded-lg border p-3 space-y-3">
+                  <div>
+                    <p className="text-sm font-medium">{saved.name}</p>
+                  </div>
+                  <div className="flex gap-1">
+                    {[saved.palette.primary, saved.palette.sidebarBackground, saved.palette.accent, saved.palette.background].map(
+                      (color, i) => (
+                        <div
+                          key={i}
+                          className="h-5 w-5 rounded-full border border-border"
+                          style={{ backgroundColor: color }}
+                        />
+                      )
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="secondary" onClick={() => handleApplySavedPalette(saved)}>
+                      Aplicar
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleDeleteSavedPalette(saved.id)}
+                      disabled={deletingPaletteId === saved.id}
+                    >
+                      <Trash2 className="h-4 w-4 mr-1" />
+                      Excluir
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 

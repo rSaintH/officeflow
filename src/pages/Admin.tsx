@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "@/lib/auth";
-import { useSectors, useSections, useProfiles, useSectorStyles, useTags, useDocTags } from "@/hooks/useSupabaseQuery";
+import { useSectors, useSections, useProfiles, useSectorStyles, useTags, useDocTags, usePermissionSettings } from "@/hooks/useSupabaseQuery";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { Navigate } from "react-router-dom";
@@ -12,16 +12,20 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Plus, Layers, Users, Palette, Tag, UserPlus, Eye, EyeOff, Settings2, Upload, FileText, Pencil, Key, Check, X } from "lucide-react";
+import { Plus, Layers, Users, Palette, Tag, UserPlus, Eye, EyeOff, Settings2, Upload, FileText, Pencil, Key, Check, X, Shield } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import ParametersAdmin from "@/components/ParametersAdmin";
 import ClientCsvImport from "@/components/ClientCsvImport";
 import { useToast } from "@/hooks/use-toast";
 import { Label } from "@/components/ui/label";
 
 export default function Admin() {
-  const { isAdmin, user } = useAuth();
+  const { isAdmin, userRole } = useAuth();
+  const isSupervisor = userRole === "supervisao" || userRole === "supervisão";
+  const canAccessAdmin = isAdmin || isSupervisor;
 
-  if (!isAdmin) return <Navigate to="/" replace />;
+  if (!canAccessAdmin) return <Navigate to="/" replace />;
 
   return (
     <div className="space-y-4 animate-fade-in">
@@ -35,20 +39,26 @@ export default function Admin() {
           <TabsTrigger value="parameters" className="gap-1"><Settings2 className="h-3 w-3" /> Parâmetros</TabsTrigger>
           <TabsTrigger value="import" className="gap-1"><Upload className="h-3 w-3" /> Importar CSV</TabsTrigger>
           <TabsTrigger value="users" className="gap-1"><Users className="h-3 w-3" /> Usuários</TabsTrigger>
+          {!isSupervisor && (
+            <TabsTrigger value="permissions" className="gap-1"><Shield className="h-3 w-3" /> Permissões</TabsTrigger>
+          )}
         </TabsList>
-        <TabsContent value="sectors" className="mt-4"><SectorsAdmin /></TabsContent>
+        <TabsContent value="sectors" className="mt-4"><SectorsAdmin canManageSectors={isAdmin} /></TabsContent>
         <TabsContent value="styles" className="mt-4"><StylesAdmin /></TabsContent>
         <TabsContent value="tags" className="mt-4"><TagsAdmin /></TabsContent>
         <TabsContent value="doc-tags" className="mt-4"><DocTagsAdmin /></TabsContent>
         <TabsContent value="parameters" className="mt-4"><ParametersAdmin /></TabsContent>
         <TabsContent value="import" className="mt-4"><ClientCsvImport /></TabsContent>
-        <TabsContent value="users" className="mt-4"><UsersAdmin /></TabsContent>
+        <TabsContent value="users" className="mt-4"><UsersAdmin readOnly={isSupervisor} /></TabsContent>
+        {!isSupervisor && (
+          <TabsContent value="permissions" className="mt-4"><PermissionsAdmin /></TabsContent>
+        )}
       </Tabs>
     </div>
   );
 }
 
-function SectorsAdmin() {
+function SectorsAdmin({ canManageSectors }: { canManageSectors: boolean }) {
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -92,34 +102,36 @@ function SectorsAdmin() {
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Setores</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex gap-2">
-            <Input
-              placeholder="Nome do setor"
-              value={newSector}
-              onChange={(e) => setNewSector(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && addSector()}
-            />
-            <Button onClick={addSector} size="sm"><Plus className="h-4 w-4" /></Button>
-          </div>
-          <div className="space-y-1">
-            {sectors?.map((s) => (
-              <div key={s.id} className="flex items-center justify-between p-2 rounded bg-muted/50">
-                <span className="text-sm font-medium">{s.name}</span>
-                <Badge variant={s.is_active ? "default" : "secondary"} className="text-xs">
-                  {s.is_active ? "Ativo" : "Inativo"}
-                </Badge>
-              </div>
-            ))}
-            {!sectors?.length && <p className="text-sm text-muted-foreground text-center py-4">Nenhum setor.</p>}
-          </div>
-        </CardContent>
-      </Card>
+    <div className={canManageSectors ? "grid grid-cols-1 lg:grid-cols-2 gap-6" : "grid grid-cols-1 gap-6"}>
+      {canManageSectors && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Setores</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex gap-2">
+              <Input
+                placeholder="Nome do setor"
+                value={newSector}
+                onChange={(e) => setNewSector(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addSector()}
+              />
+              <Button onClick={addSector} size="sm"><Plus className="h-4 w-4" /></Button>
+            </div>
+            <div className="space-y-1">
+              {sectors?.map((s) => (
+                <div key={s.id} className="flex items-center justify-between p-2 rounded bg-muted/50">
+                  <span className="text-sm font-medium">{s.name}</span>
+                  <Badge variant={s.is_active ? "default" : "secondary"} className="text-xs">
+                    {s.is_active ? "Ativo" : "Inativo"}
+                  </Badge>
+                </div>
+              ))}
+              {!sectors?.length && <p className="text-sm text-muted-foreground text-center py-4">Nenhum setor.</p>}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
@@ -233,7 +245,7 @@ function StylesAdmin() {
   );
 }
 
-function UsersAdmin() {
+function UsersAdmin({ readOnly = false }: { readOnly?: boolean }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { data: profiles } = useProfiles();
@@ -253,24 +265,21 @@ function UsersAdmin() {
   const [editPasswordValue, setEditPasswordValue] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
 
-  const toggleRole = async (userId: string, currentRoles: any[]) => {
-    const hasAdmin = currentRoles?.some((r: any) => r.role === "admin");
+  const changeRole = async (userId: string, newRoleValue: string) => {
     try {
-      if (hasAdmin) {
-        const { error } = await supabase
-          .from("user_roles")
-          .delete()
-          .eq("user_id", userId)
-          .eq("role", "admin");
-        if (error) throw error;
-      } else {
-        const { error } = await supabase
-          .from("user_roles")
-          .insert({ user_id: userId, role: "admin" });
-        if (error) throw error;
-      }
+      // Remove all existing roles for this user
+      const { error: delError } = await supabase
+        .from("user_roles")
+        .delete()
+        .eq("user_id", userId);
+      if (delError) throw delError;
+      // Insert the new role
+      const { error: insError } = await supabase
+        .from("user_roles")
+        .insert({ user_id: userId, role: newRoleValue });
+      if (insError) throw insError;
       queryClient.invalidateQueries({ queryKey: ["profiles"] });
-      toast({ title: "Perfil atualizado!" });
+      toast({ title: "Cargo atualizado!" });
     } catch (err: any) {
       toast({ title: "Erro", description: err.message, variant: "destructive" });
     }
@@ -353,8 +362,8 @@ function UsersAdmin() {
       if (res.error) throw new Error(res.error.message || "Erro ao criar usuário");
       if (res.data?.error) throw new Error(res.data.error);
       const newUserId = res.data?.user?.id;
-      if (newUserId && newRole === "admin") {
-        await supabase.from("user_roles").insert({ user_id: newUserId, role: "admin" });
+      if (newUserId) {
+        await supabase.from("user_roles").insert({ user_id: newUserId, role: newRole });
       }
       queryClient.invalidateQueries({ queryKey: ["profiles"] });
       setNewEmail("");
@@ -372,78 +381,81 @@ function UsersAdmin() {
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <UserPlus className="h-4 w-4" /> Criar Novo Usuário
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-            <div className="space-y-1">
-              <Label className="text-xs">Nome completo</Label>
-              <Input
-                placeholder="Nome completo"
-                value={newFullName}
-                onChange={(e) => setNewFullName(e.target.value)}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Cargo</Label>
-              <Select value={newRole} onValueChange={setNewRole}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="colaborador">Colaborador</SelectItem>
-                  <SelectItem value="admin">Admin</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Setor</Label>
-              <Select value={newSectorId} onValueChange={setNewSectorId}>
-                <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
-                <SelectContent>
-                  {sectors?.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">E-mail</Label>
-              <Input
-                type="email"
-                placeholder="email@exemplo.com"
-                value={newEmail}
-                onChange={(e) => setNewEmail(e.target.value)}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Senha</Label>
-              <div className="flex gap-1">
-                <div className="relative flex-1">
-                  <Input
-                    type={showPassword ? "text" : "password"}
-                    placeholder="Mínimo 6 caracteres"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    onClick={() => setShowPassword(!showPassword)}
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
+      {!readOnly && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <UserPlus className="h-4 w-4" /> Criar Novo Usuário
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Nome completo</Label>
+                <Input
+                  placeholder="Nome completo"
+                  value={newFullName}
+                  onChange={(e) => setNewFullName(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Cargo</Label>
+                <Select value={newRole} onValueChange={setNewRole}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="colaborador">Colaborador</SelectItem>
+                    <SelectItem value="supervisao">Supervisão</SelectItem>
+                    <SelectItem value="admin">Admin</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Setor</Label>
+                <Select value={newSectorId} onValueChange={setNewSectorId}>
+                  <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
+                  <SelectContent>
+                    {sectors?.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">E-mail</Label>
+                <Input
+                  type="email"
+                  placeholder="email@exemplo.com"
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Senha</Label>
+                <div className="flex gap-1">
+                  <div className="relative flex-1">
+                    <Input
+                      type={showPassword ? "text" : "password"}
+                      placeholder="Mínimo 6 caracteres"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      onClick={() => setShowPassword(!showPassword)}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  <Button onClick={createUser} size="sm" disabled={creating}>
+                    {creating ? "Criando..." : "Criar"}
+                  </Button>
                 </div>
-                <Button onClick={createUser} size="sm" disabled={creating}>
-                  {creating ? "Criando..." : "Criar"}
-                </Button>
               </div>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
@@ -452,7 +464,27 @@ function UsersAdmin() {
         <CardContent>
           <div className="space-y-2">
             {profiles?.map((p: any) => {
-              const hasAdmin = p.user_roles?.some((r: any) => r.role === "admin");
+              const currentRole = p.user_roles?.[0]?.role || "colaborador";
+              const roleLabel = ROLE_LABELS[currentRole] || currentRole;
+              const sectorLabel = sectors?.find((s) => s.id === p.sector_id)?.name || "Sem setor";
+
+              if (readOnly) {
+                return (
+                  <div key={p.id} className="p-3 rounded bg-muted/50">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium">{p.full_name || "Sem nome"}</p>
+                        <p className="text-xs text-muted-foreground">{p.email}</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Badge variant="outline" className="text-xs">{sectorLabel}</Badge>
+                        <Badge variant="secondary" className="text-xs">{roleLabel}</Badge>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
               return (
                 <div key={p.id} className="p-3 rounded bg-muted/50 space-y-2">
                   <div className="flex items-center gap-3">
@@ -507,17 +539,20 @@ function UsersAdmin() {
                       </SelectContent>
                     </Select>
 
-                    {/* Role badge + toggle */}
-                    <Badge variant={hasAdmin ? "default" : "secondary"}>
-                      {hasAdmin ? "Admin" : "Colaborador"}
-                    </Badge>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => toggleRole(p.user_id, p.user_roles)}
+                    {/* Role select */}
+                    <Select
+                      value={currentRole}
+                      onValueChange={(val) => changeRole(p.user_id, val)}
                     >
-                      {hasAdmin ? "Remover admin" : "Tornar admin"}
-                    </Button>
+                      <SelectTrigger className="w-36 h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="colaborador">Colaborador</SelectItem>
+                        <SelectItem value="supervisao">Supervisão</SelectItem>
+                        <SelectItem value="admin">Admin</SelectItem>
+                      </SelectContent>
+                    </Select>
 
                     {/* Change password button */}
                     <Button
@@ -767,3 +802,132 @@ function DocTagsAdmin() {
     </Card>
   );
 }
+
+const PERMISSION_CONFIG: Record<string, { label: string; description: string; type: "roles" | "switch" }> = {
+  restrict_collaborator_sectors: {
+    label: "Restringir colaboradores ao próprio setor",
+    description: "Quando ativado, colaboradores são redirecionados diretamente ao seu setor ao acessar um cliente, sem poder acessar outros setores.",
+    type: "switch",
+  },
+  reinf_fill_profits: {
+    label: "Preencher lucros na EFD-REINF",
+    description: "Selecione quais cargos podem preencher os lucros na EFD-REINF:",
+    type: "roles",
+  },
+};
+
+const ROLE_LABELS: Record<string, string> = {
+  admin: "Admin",
+  supervisao: "Supervisão",
+  colaborador: "Colaborador",
+};
+
+const ALL_ROLES = ["admin", "supervisao", "colaborador"];
+
+function PermissionsAdmin() {
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const { data: permissions, isLoading } = usePermissionSettings();
+  const [saving, setSaving] = useState<Record<string, boolean>>({});
+
+  const toggleRole = async (permKey: string, role: string) => {
+    const perm = permissions?.find((p: any) => p.key === permKey);
+    if (!perm) return;
+    const currentRoles: string[] = perm.allowed_roles || [];
+    const newRoles = currentRoles.includes(role)
+      ? currentRoles.filter((r: string) => r !== role)
+      : [...currentRoles, role];
+
+    setSaving((prev) => ({ ...prev, [permKey]: true }));
+    try {
+      const { error } = await supabase
+        .from("permission_settings")
+        .update({ allowed_roles: newRoles, updated_by: user?.id })
+        .eq("key", permKey);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ["permission_settings"] });
+      toast({ title: "Permissão atualizada!" });
+    } catch (err: any) {
+      toast({ title: "Erro", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving((prev) => ({ ...prev, [permKey]: false }));
+    }
+  };
+
+  const toggleSwitch = async (permKey: string, currentEnabled: boolean) => {
+    setSaving((prev) => ({ ...prev, [permKey]: true }));
+    try {
+      const { error } = await supabase
+        .from("permission_settings")
+        .update({ enabled: !currentEnabled, updated_by: user?.id })
+        .eq("key", permKey);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ["permission_settings"] });
+      toast({ title: !currentEnabled ? "Ativado!" : "Desativado!" });
+    } catch (err: any) {
+      toast({ title: "Erro", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving((prev) => ({ ...prev, [permKey]: false }));
+    }
+  };
+
+  if (isLoading) return <div className="text-sm text-muted-foreground py-4">Carregando...</div>;
+
+  // Sort: switches first, then role-based
+  const orderedKeys = Object.keys(PERMISSION_CONFIG);
+
+  return (
+    <div className="space-y-4">
+      {orderedKeys.map((key) => {
+        const config = PERMISSION_CONFIG[key];
+        const perm = permissions?.find((p: any) => p.key === key);
+        if (!perm) return null;
+
+        return (
+          <Card key={perm.id}>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Shield className="h-4 w-4" />
+                {config.label}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-xs text-muted-foreground mb-3">{config.description}</p>
+              {config.type === "switch" ? (
+                <div className="flex items-center gap-3">
+                  <Switch
+                    checked={perm.enabled ?? false}
+                    onCheckedChange={() => toggleSwitch(key, perm.enabled ?? false)}
+                    disabled={saving[key]}
+                  />
+                  <span className="text-sm">{perm.enabled ? "Ativado" : "Desativado"}</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-6">
+                  {ALL_ROLES.map((role) => (
+                    <div key={role} className="flex items-center gap-2">
+                      <Checkbox
+                        id={`perm-${key}-${role}`}
+                        checked={(perm.allowed_roles || []).includes(role)}
+                        onCheckedChange={() => toggleRole(key, role)}
+                        disabled={saving[key]}
+                      />
+                      <Label htmlFor={`perm-${key}-${role}`} className="text-sm cursor-pointer">
+                        {ROLE_LABELS[role] || role}
+                      </Label>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })}
+      {!permissions?.length && (
+        <p className="text-sm text-muted-foreground text-center py-8">Nenhuma permissão configurável.</p>
+      )}
+    </div>
+  );
+}
+

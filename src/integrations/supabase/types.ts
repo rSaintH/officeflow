@@ -851,6 +851,33 @@ export type Database = {
           },
         ]
       }
+      permission_settings: {
+        Row: {
+          id: string
+          key: string
+          allowed_roles: string[]
+          enabled: boolean
+          updated_by: string | null
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          key: string
+          allowed_roles?: string[]
+          enabled?: boolean
+          updated_by?: string | null
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          key?: string
+          allowed_roles?: string[]
+          enabled?: boolean
+          updated_by?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string

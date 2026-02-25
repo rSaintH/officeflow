@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { useTasksWithComments, useSectors, useClients, useParameterOptions } from "@/hooks/useSupabaseQuery";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,9 +16,23 @@ import ExpandableRecordCard from "@/components/ExpandableRecordCard";
 import { CLOSED_TASK_STATUSES } from "@/lib/constants";
 
 export default function Tasks() {
+  const queryClient = useQueryClient();
   const { data: sectors } = useSectors();
   const { data: clients } = useClients();
   const { data: taskStatuses } = useParameterOptions("task_status");
+
+  // Realtime: atualiza pendências quando outro usuário faz mudanças
+  useEffect(() => {
+    const channel = supabase
+      .channel("tasks-realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => {
+        queryClient.invalidateQueries({ queryKey: ["tasks"] });
+        queryClient.invalidateQueries({ queryKey: ["tasks_with_comments"] });
+        queryClient.invalidateQueries({ queryKey: ["task_stats"] });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [queryClient]);
   const [sectorFilter, setSectorFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("open");
   const [search, setSearch] = useState("");

@@ -21,6 +21,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import ThemeToggle from "@/components/ThemeToggle";
+import gremioLogo from "@/assets/gremio-logo.png";
+import renatoGauchoImage from "@/assets/renato-gaucho.jpeg";
 
 const navItems = [
   { path: "/", label: "Início", icon: Home },
@@ -36,13 +38,18 @@ const adminItems = [
 ];
 
 export default function AppLayout({ children }: { children: ReactNode }) {
-  const { user, isAdmin, signOut } = useAuth();
-  const { easterEggUnlocked } = useTheme();
+  const { user, isAdmin, userRole, signOut } = useAuth();
+  const { easterEggUnlocked, palette, paletteActive } = useTheme();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     return localStorage.getItem("sidebarCollapsed") === "true";
   });
+
+  const isGremioThemeActive =
+    paletteActive &&
+    palette.primary.toLowerCase() === "#00a3e0" &&
+    palette.sidebarBackground.toLowerCase() === "#000000";
 
   const toggleCollapsed = () => {
     setSidebarCollapsed((prev) => {
@@ -55,7 +62,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     ? [{ path: "/customization", label: "Customização", icon: Sparkles }]
     : [];
 
-  const allItems = [...navItems, ...(isAdmin ? adminItems : []), ...easterEggItems];
+  const isSupervisor = userRole === "supervisao" || userRole === "supervisão";
+  const canAccessAdmin = isAdmin || isSupervisor;
+  const allItems = [...navItems, ...(canAccessAdmin ? adminItems : []), ...easterEggItems];
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -80,7 +89,16 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       >
         <div className="flex h-14 items-center gap-2 px-4 border-b border-sidebar-border justify-between">
           <div className="flex items-center gap-2">
-            <Building2 className="h-6 w-6 text-sidebar-primary flex-shrink-0" />
+            {isGremioThemeActive ? (
+              <img
+                src={gremioLogo}
+                alt="Gremio"
+                className="h-7 w-7 object-contain flex-shrink-0"
+                loading="lazy"
+              />
+            ) : (
+              <Building2 className="h-6 w-6 text-sidebar-primary flex-shrink-0" />
+            )}
             <span className="font-bold text-lg text-sidebar-accent-foreground whitespace-nowrap">ContaOffice</span>
           </div>
           <Button
@@ -115,6 +133,17 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               </Link>
             );
           })}
+
+          {isGremioThemeActive && (
+            <div className="mt-4 rounded-md border border-sidebar-border bg-sidebar-accent/70 p-2">
+              <img
+                src={renatoGauchoImage}
+                alt="Renato Gaucho"
+                className="h-50 w-full rounded object-cover object-top"
+                loading="lazy"
+              />
+            </div>
+          )}
         </nav>
 
         <div className="border-t border-sidebar-border p-3">
@@ -127,7 +156,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                 {user?.email}
               </p>
               <p className="text-[10px] text-sidebar-muted">
-                {isAdmin ? "Admin" : "Colaborador"}
+                {{ admin: "Admin", supervisao: "Supervisão", colaborador: "Colaborador" }[userRole] || "Colaborador"}
               </p>
             </div>
           </div>

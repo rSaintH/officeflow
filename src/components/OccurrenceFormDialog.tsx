@@ -62,7 +62,7 @@ export default function OccurrenceFormDialog({ open, onClose, clientId, sectorId
       } as any);
       if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ["occurrences"] });
-      queryClient.invalidateQueries({ queryKey: ["occurrences_with_comments"] });
+      queryClient.invalidateQueries({ queryKey: ["occurrences_with_comments", clientId] });
       toast({ title: "Ocorrência registrada!" });
       onClose();
     } catch (err: any) {

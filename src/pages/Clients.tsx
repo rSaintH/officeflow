@@ -1,17 +1,18 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, type MouseEvent } from "react";
 import { Link } from "react-router-dom";
 import { useClients, useTags } from "@/hooks/useSupabaseQuery";
 import { supabase } from "@/integrations/supabase/client";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Search, Building, ChevronRight } from "lucide-react";
+import { Plus, Search, Building, ChevronRight, Star } from "lucide-react";
 import ClientFormDialog from "@/components/ClientFormDialog";
 import { getClientStatusBadgeClass } from "@/lib/constants";
+import { useToast } from "@/hooks/use-toast";
 
 function useAllClientTags() {
   return useQuery({
@@ -28,11 +29,14 @@ export default function Clients() {
   const { data: clients, isLoading } = useClients();
   const { data: tags } = useTags();
   const { data: allClientTags } = useAllClientTags();
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [showTags, setShowTags] = useState(false);
+  const [togglingFavoriteId, setTogglingFavoriteId] = useState<string | null>(null);
 
   const handleSearch = useCallback((value: string) => {
     setSearch(value);
@@ -64,6 +68,44 @@ export default function Clients() {
         c.cnpj?.includes(debouncedSearch)
     );
   }, [clients, debouncedSearch]);
+
+  const handleToggleFavorite = async (
+    event: MouseEvent<HTMLButtonElement>,
+    clientId: string,
+    isFavorite: boolean
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!user?.id) return;
+
+    setTogglingFavoriteId(clientId);
+    try {
+      if (isFavorite) {
+        const { error } = await supabase
+          .from("client_favorites" as any)
+          .delete()
+          .eq("user_id", user.id)
+          .eq("client_id", clientId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from("client_favorites" as any)
+          .insert({ user_id: user.id, client_id: clientId });
+        if (error) throw error;
+      }
+
+      await queryClient.invalidateQueries({ queryKey: ["clients"] });
+    } catch (err: any) {
+      toast({
+        title: "Erro ao atualizar favorito",
+        description: err.message || "Nao foi possivel atualizar o favorito.",
+        variant: "destructive",
+      });
+    } finally {
+      setTogglingFavoriteId(null);
+    }
+  };
 
 
   return (
@@ -108,6 +150,7 @@ export default function Clients() {
         <div className="space-y-2">
           {filtered?.map((client) => {
             const clientTags = showTags ? getClientTags(client.id) : [];
+            const isFavorite = Boolean((client as any).is_favorite);
             return (
               <Link key={client.id} to={`/clients/${client.id}`}>
                 <Card className="hover:shadow-md transition-shadow cursor-pointer">
@@ -141,6 +184,17 @@ export default function Clients() {
                     <Badge className={getClientStatusBadgeClass(client.status)} variant="outline">
                       {client.status}
                     </Badge>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 flex-shrink-0"
+                      onClick={(event) => handleToggleFavorite(event, client.id, isFavorite)}
+                      disabled={togglingFavoriteId === client.id}
+                      aria-label={isFavorite ? "Remover dos favoritos" : "Marcar como favorito"}
+                    >
+                      <Star className={`h-4 w-4 ${isFavorite ? "fill-amber-400 text-amber-400" : "text-muted-foreground"}`} />
+                    </Button>
                     <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                   </CardContent>
                 </Card>
