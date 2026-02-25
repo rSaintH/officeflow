@@ -536,6 +536,39 @@ export function useDocumentReportLogs(yearMonth: string) {
   });
 }
 
+export function useDocTags() {
+  return useQuery({
+    queryKey: ["doc_tags"],
+    staleTime: STALE_5MIN,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("doc_tags")
+        .select("*")
+        .eq("is_active", true)
+        .order("name");
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+export function useDocumentTypeDocTags(documentTypeIds: string[]) {
+  return useQuery({
+    queryKey: ["document_type_doc_tags", documentTypeIds],
+    staleTime: STALE_5MIN,
+    queryFn: async () => {
+      if (documentTypeIds.length === 0) return [];
+      const { data, error } = await supabase
+        .from("document_type_doc_tags")
+        .select("*, doc_tags(id, name, color, text_color)")
+        .in("document_type_id", documentTypeIds);
+      if (error) throw error;
+      return data;
+    },
+    enabled: documentTypeIds.length > 0,
+  });
+}
+
 export function useClientTags(clientId: string) {
   return useQuery({
     queryKey: ["client_tags", clientId],

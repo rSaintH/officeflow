@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "@/lib/auth";
-import { useSectors, useSections, useProfiles, useSectorStyles, useTags } from "@/hooks/useSupabaseQuery";
+import { useSectors, useSections, useProfiles, useSectorStyles, useTags, useDocTags } from "@/hooks/useSupabaseQuery";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { Navigate } from "react-router-dom";
@@ -12,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Plus, Layers, Users, Palette, Tag, UserPlus, Eye, EyeOff, Settings2, Upload } from "lucide-react";
+import { Plus, Layers, Users, Palette, Tag, UserPlus, Eye, EyeOff, Settings2, Upload, FileText, Pencil, Key, Check, X } from "lucide-react";
 import ParametersAdmin from "@/components/ParametersAdmin";
 import ClientCsvImport from "@/components/ClientCsvImport";
 import { useToast } from "@/hooks/use-toast";
@@ -31,6 +31,7 @@ export default function Admin() {
           <TabsTrigger value="sectors" className="gap-1"><Layers className="h-3 w-3" /> Setores & Seções</TabsTrigger>
           <TabsTrigger value="styles" className="gap-1"><Palette className="h-3 w-3" /> Estilos</TabsTrigger>
           <TabsTrigger value="tags" className="gap-1"><Tag className="h-3 w-3" /> Tags</TabsTrigger>
+          <TabsTrigger value="doc-tags" className="gap-1"><FileText className="h-3 w-3" /> Tags de Documentos</TabsTrigger>
           <TabsTrigger value="parameters" className="gap-1"><Settings2 className="h-3 w-3" /> Parâmetros</TabsTrigger>
           <TabsTrigger value="import" className="gap-1"><Upload className="h-3 w-3" /> Importar CSV</TabsTrigger>
           <TabsTrigger value="users" className="gap-1"><Users className="h-3 w-3" /> Usuários</TabsTrigger>
@@ -38,6 +39,7 @@ export default function Admin() {
         <TabsContent value="sectors" className="mt-4"><SectorsAdmin /></TabsContent>
         <TabsContent value="styles" className="mt-4"><StylesAdmin /></TabsContent>
         <TabsContent value="tags" className="mt-4"><TagsAdmin /></TabsContent>
+        <TabsContent value="doc-tags" className="mt-4"><DocTagsAdmin /></TabsContent>
         <TabsContent value="parameters" className="mt-4"><ParametersAdmin /></TabsContent>
         <TabsContent value="import" className="mt-4"><ClientCsvImport /></TabsContent>
         <TabsContent value="users" className="mt-4"><UsersAdmin /></TabsContent>
@@ -244,6 +246,13 @@ function UsersAdmin() {
   const [showPassword, setShowPassword] = useState(false);
   const [creating, setCreating] = useState(false);
 
+  // Edit states
+  const [editingNameId, setEditingNameId] = useState<string | null>(null);
+  const [editNameValue, setEditNameValue] = useState("");
+  const [editingPasswordId, setEditingPasswordId] = useState<string | null>(null);
+  const [editPasswordValue, setEditPasswordValue] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+
   const toggleRole = async (userId: string, currentRoles: any[]) => {
     const hasAdmin = currentRoles?.some((r: any) => r.role === "admin");
     try {
@@ -269,15 +278,56 @@ function UsersAdmin() {
 
   const updateSector = async (userId: string, sectorId: string | null) => {
     try {
-      const { error } = await supabase
-        .from("profiles")
-        .update({ sector_id: sectorId })
-        .eq("user_id", userId);
-      if (error) throw error;
+      const res = await supabase.functions.invoke("update-user", {
+        body: { user_id: userId, sector_id: sectorId },
+      });
+      if (res.error) throw new Error(res.error.message);
+      if (res.data?.error) throw new Error(res.data.error);
       queryClient.invalidateQueries({ queryKey: ["profiles"] });
       toast({ title: "Setor atualizado!" });
     } catch (err: any) {
       toast({ title: "Erro", description: err.message, variant: "destructive" });
+    }
+  };
+
+  const saveEditName = async (userId: string) => {
+    if (!editNameValue.trim()) return;
+    setSavingEdit(true);
+    try {
+      const res = await supabase.functions.invoke("update-user", {
+        body: { user_id: userId, full_name: editNameValue.trim() },
+      });
+      if (res.error) throw new Error(res.error.message);
+      if (res.data?.error) throw new Error(res.data.error);
+      queryClient.invalidateQueries({ queryKey: ["profiles"] });
+      setEditingNameId(null);
+      toast({ title: "Nome atualizado!" });
+    } catch (err: any) {
+      toast({ title: "Erro", description: err.message, variant: "destructive" });
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const saveEditPassword = async (userId: string) => {
+    if (!editPasswordValue.trim() || editPasswordValue.length < 6) {
+      toast({ title: "Erro", description: "A senha deve ter pelo menos 6 caracteres", variant: "destructive" });
+      return;
+    }
+    setSavingEdit(true);
+    try {
+      const res = await supabase.functions.invoke("update-user", {
+        body: { user_id: userId, password: editPasswordValue },
+      });
+      if (res.error) throw new Error(res.error.message);
+      if (res.data?.error) throw new Error(res.data.error);
+      setEditingPasswordId(null);
+      setEditPasswordValue("");
+      toast({ title: "Senha atualizada! O usuário precisará trocar no próximo login." });
+    } catch (err: any) {
+      toast({ title: "Erro", description: err.message, variant: "destructive" });
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -403,14 +453,45 @@ function UsersAdmin() {
           <div className="space-y-2">
             {profiles?.map((p: any) => {
               const hasAdmin = p.user_roles?.some((r: any) => r.role === "admin");
-              const sectorName = sectors?.find((s) => s.id === p.sector_id)?.name;
               return (
-                <div key={p.id} className="flex items-center justify-between p-3 rounded bg-muted/50 gap-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">{p.full_name || "Sem nome"}</p>
-                    <p className="text-xs text-muted-foreground">{p.email}</p>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
+                <div key={p.id} className="p-3 rounded bg-muted/50 space-y-2">
+                  <div className="flex items-center gap-3">
+                    {/* Name (editable) */}
+                    <div className="min-w-0 flex-1">
+                      {editingNameId === p.user_id ? (
+                        <div className="flex items-center gap-1">
+                          <Input
+                            value={editNameValue}
+                            onChange={(e) => setEditNameValue(e.target.value)}
+                            className="h-7 text-sm"
+                            onKeyDown={(e) => e.key === "Enter" && saveEditName(p.user_id)}
+                            autoFocus
+                          />
+                          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => saveEditName(p.user_id)} disabled={savingEdit}>
+                            <Check className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditingNameId(null)}>
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          <p className="text-sm font-medium">{p.full_name || "Sem nome"}</p>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6"
+                            onClick={() => { setEditingNameId(p.user_id); setEditNameValue(p.full_name || ""); }}
+                            title="Editar nome"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      )}
+                      <p className="text-xs text-muted-foreground">{p.email}</p>
+                    </div>
+
+                    {/* Sector */}
                     <Select
                       value={p.sector_id || "none"}
                       onValueChange={(val) => updateSector(p.user_id, val === "none" ? null : val)}
@@ -425,6 +506,8 @@ function UsersAdmin() {
                         ))}
                       </SelectContent>
                     </Select>
+
+                    {/* Role badge + toggle */}
                     <Badge variant={hasAdmin ? "default" : "secondary"}>
                       {hasAdmin ? "Admin" : "Colaborador"}
                     </Badge>
@@ -435,7 +518,44 @@ function UsersAdmin() {
                     >
                       {hasAdmin ? "Remover admin" : "Tornar admin"}
                     </Button>
+
+                    {/* Change password button */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1"
+                      onClick={() => {
+                        setEditingPasswordId(editingPasswordId === p.user_id ? null : p.user_id);
+                        setEditPasswordValue("");
+                      }}
+                      title="Alterar senha"
+                    >
+                      <Key className="h-3.5 w-3.5" />
+                      Senha
+                    </Button>
                   </div>
+
+                  {/* Password edit row */}
+                  {editingPasswordId === p.user_id && (
+                    <div className="flex items-center gap-2 pl-1">
+                      <Label className="text-xs text-muted-foreground whitespace-nowrap">Nova senha:</Label>
+                      <Input
+                        type="password"
+                        value={editPasswordValue}
+                        onChange={(e) => setEditPasswordValue(e.target.value)}
+                        placeholder="Mínimo 6 caracteres"
+                        className="h-7 text-sm max-w-xs"
+                        onKeyDown={(e) => e.key === "Enter" && saveEditPassword(p.user_id)}
+                        autoFocus
+                      />
+                      <Button size="sm" className="h-7" onClick={() => saveEditPassword(p.user_id)} disabled={savingEdit}>
+                        Salvar
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-7" onClick={() => { setEditingPasswordId(null); setEditPasswordValue(""); }}>
+                        Cancelar
+                      </Button>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -533,6 +653,116 @@ function TagsAdmin() {
            ))}
            {!tags?.length && <p className="text-sm text-muted-foreground text-center py-4">Nenhuma tag.</p>}
          </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function DocTagsAdmin() {
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const { data: docTags } = useDocTags();
+  const [newTag, setNewTag] = useState("");
+  const [newTagColor, setNewTagColor] = useState("#3b82f6");
+  const [newTagTextColor, setNewTagTextColor] = useState("#ffffff");
+
+  const addTag = async () => {
+    if (!newTag.trim()) return;
+    const { error } = await supabase.from("doc_tags").insert({
+      name: newTag.trim(),
+      color: newTagColor,
+      text_color: newTagTextColor,
+      created_by: user?.id,
+    });
+    if (error) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+      return;
+    }
+    queryClient.invalidateQueries({ queryKey: ["doc_tags"] });
+    setNewTag("");
+    toast({ title: "Tag de documento criada!" });
+  };
+
+  const deleteTag = async (tagId: string) => {
+    try {
+      const { error } = await supabase.from("doc_tags").delete().eq("id", tagId);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ["doc_tags"] });
+      toast({ title: "Tag excluída!" });
+    } catch (err: any) {
+      toast({ title: "Erro", description: err.message, variant: "destructive" });
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Tags de Documentos</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex gap-2 items-end">
+          <Input
+            placeholder="Nome da tag"
+            value={newTag}
+            onChange={(e) => setNewTag(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addTag()}
+          />
+          <div className="flex items-center gap-1.5">
+            <div className="text-center">
+              <Label className="text-[10px] text-muted-foreground">Fundo</Label>
+              <input
+                type="color"
+                value={newTagColor}
+                onChange={(e) => setNewTagColor(e.target.value)}
+                className="h-9 w-10 rounded border cursor-pointer"
+              />
+            </div>
+            <div className="text-center">
+              <Label className="text-[10px] text-muted-foreground">Texto</Label>
+              <input
+                type="color"
+                value={newTagTextColor}
+                onChange={(e) => setNewTagTextColor(e.target.value)}
+                className="h-9 w-10 rounded border cursor-pointer"
+              />
+            </div>
+            <span
+              className="px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap"
+              style={{ backgroundColor: newTagColor, color: newTagTextColor }}
+            >
+              {newTag || "Preview"}
+            </span>
+            <Button onClick={addTag} size="sm"><Plus className="h-4 w-4" /></Button>
+          </div>
+        </div>
+        <div className="space-y-2">
+          {docTags?.map((t: any) => (
+            <div key={t.id} className="flex items-center justify-between p-3 rounded bg-muted/50">
+              <div className="flex items-center gap-2">
+                <span
+                  className="px-2 py-0.5 rounded-full text-[10px] font-medium"
+                  style={{ backgroundColor: t.color || "#3b82f6", color: t.text_color || "#ffffff" }}
+                >
+                  {t.name}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant={t.is_active ? "default" : "secondary"} className="text-xs">
+                  {t.is_active ? "Ativa" : "Inativa"}
+                </Badge>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => deleteTag(t.id)}
+                >
+                  Excluir
+                </Button>
+              </div>
+            </div>
+          ))}
+          {!docTags?.length && <p className="text-sm text-muted-foreground text-center py-4">Nenhuma tag de documento.</p>}
+        </div>
       </CardContent>
     </Card>
   );

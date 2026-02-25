@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
-import { useDocumentTypes } from "@/hooks/useSupabaseQuery";
+import { useDocumentTypes, useDocTags, useDocumentTypeDocTags } from "@/hooks/useSupabaseQuery";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -15,7 +15,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Trash2, GripVertical, Pencil } from "lucide-react";
+import { Plus, Trash2, GripVertical, Pencil, Tag } from "lucide-react";
 
 interface Props {
   open: boolean;
@@ -41,30 +41,55 @@ export default function DocumentTypeManager({ open, onClose, clientId, clientNam
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { data: docTypes, isLoading } = useDocumentTypes(clientId);
+  const { data: allDocTags } = useDocTags();
+  const docTypeIds = docTypes?.map((d: any) => d.id) || [];
+  const { data: docTypeTagAssignments } = useDocumentTypeDocTags(docTypeIds);
 
   const [newName, setNewName] = useState("");
   const [newClassification, setNewClassification] = useState("necessario");
+  const [newSelectedTags, setNewSelectedTags] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editClassification, setEditClassification] = useState("");
+  const [editSelectedTags, setEditSelectedTags] = useState<string[]>([]);
+  const [editingTagsId, setEditingTagsId] = useState<string | null>(null);
+
+  const saveTagAssignments = async (docTypeId: string, tagIds: string[]) => {
+    // Delete existing assignments
+    await supabase.from("document_type_doc_tags").delete().eq("document_type_id", docTypeId);
+    // Insert new assignments
+    if (tagIds.length > 0) {
+      const rows = tagIds.map((tagId) => ({ document_type_id: docTypeId, doc_tag_id: tagId }));
+      await supabase.from("document_type_doc_tags").insert(rows);
+    }
+    queryClient.invalidateQueries({ queryKey: ["document_type_doc_tags"] });
+  };
+
+  const getTagsForDoc = (docId: string) => {
+    return docTypeTagAssignments?.filter((a: any) => a.document_type_id === docId) || [];
+  };
 
   const handleAdd = async () => {
     if (!newName.trim()) return;
     setSaving(true);
     try {
       const maxOrder = docTypes?.length ? Math.max(...docTypes.map((d: any) => d.order_index)) + 1 : 0;
-      const { error } = await supabase.from("document_types").insert({
+      const { data, error } = await supabase.from("document_types").insert({
         client_id: clientId,
         name: newName.trim(),
         classification: newClassification,
         order_index: maxOrder,
         created_by: user?.id,
         updated_by: user?.id,
-      });
+      }).select("id").single();
       if (error) throw error;
+      if (data && newSelectedTags.length > 0) {
+        await saveTagAssignments(data.id, newSelectedTags);
+      }
       setNewName("");
       setNewClassification("necessario");
+      setNewSelectedTags([]);
       queryClient.invalidateQueries({ queryKey: ["document_types", clientId] });
       toast({ title: "Documento adicionado!" });
     } catch (err: any) {
@@ -116,6 +141,7 @@ export default function DocumentTypeManager({ open, onClose, clientId, clientNam
         .update({ name: editName.trim(), classification: editClassification, updated_by: user?.id })
         .eq("id", editingId);
       if (error) throw error;
+      await saveTagAssignments(editingId, editSelectedTags);
       setEditingId(null);
       queryClient.invalidateQueries({ queryKey: ["document_types", clientId] });
       toast({ title: "Documento atualizado!" });
@@ -128,6 +154,7 @@ export default function DocumentTypeManager({ open, onClose, clientId, clientNam
     setEditingId(doc.id);
     setEditName(doc.name);
     setEditClassification(doc.classification);
+    setEditSelectedTags(getTagsForDoc(doc.id).map((a: any) => a.doc_tag_id));
   };
 
   return (
@@ -138,30 +165,56 @@ export default function DocumentTypeManager({ open, onClose, clientId, clientNam
         </DialogHeader>
 
         {/* Add new document */}
-        <div className="flex gap-2 items-end">
-          <div className="flex-1 space-y-1">
-            <Label className="text-xs">Nome do documento</Label>
-            <Input
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="Ex: Balancete mensal"
-              onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-            />
+        <div className="space-y-2">
+          <div className="flex gap-2 items-end">
+            <div className="flex-1 space-y-1">
+              <Label className="text-xs">Nome do documento</Label>
+              <Input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="Ex: Balancete mensal"
+                onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+              />
+            </div>
+            <div className="w-40 space-y-1">
+              <Label className="text-xs">Classificação</Label>
+              <Select value={newClassification} onValueChange={setNewClassification}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="essencial">Essencial</SelectItem>
+                  <SelectItem value="necessario">Necessário</SelectItem>
+                  <SelectItem value="irrelevante">Irrelevante</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Button onClick={handleAdd} disabled={saving || !newName.trim()} size="sm">
+              <Plus className="h-4 w-4 mr-1" /> Adicionar
+            </Button>
           </div>
-          <div className="w-40 space-y-1">
-            <Label className="text-xs">Classificação</Label>
-            <Select value={newClassification} onValueChange={setNewClassification}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="essencial">Essencial</SelectItem>
-                <SelectItem value="necessario">Necessário</SelectItem>
-                <SelectItem value="irrelevante">Irrelevante</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <Button onClick={handleAdd} disabled={saving || !newName.trim()} size="sm">
-            <Plus className="h-4 w-4 mr-1" /> Adicionar
-          </Button>
+          {allDocTags && allDocTags.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <Tag className="h-3 w-3 text-muted-foreground" />
+              {allDocTags.map((tag: any) => {
+                const isSelected = newSelectedTags.includes(tag.id);
+                return (
+                  <span
+                    key={tag.id}
+                    onClick={() => {
+                      setNewSelectedTags(isSelected
+                        ? newSelectedTags.filter((id) => id !== tag.id)
+                        : [...newSelectedTags, tag.id]);
+                    }}
+                    className={`px-2 py-0.5 rounded-full cursor-pointer text-[10px] font-medium transition-all ${
+                      isSelected ? "ring-2 ring-offset-1" : "opacity-50 hover:opacity-100"
+                    }`}
+                    style={{ backgroundColor: tag.color || "#3b82f6", color: tag.text_color || "#ffffff" }}
+                  >
+                    {tag.name}
+                  </span>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Document list */}
@@ -178,27 +231,64 @@ export default function DocumentTypeManager({ open, onClose, clientId, clientNam
               <GripVertical className="h-4 w-4 text-muted-foreground shrink-0" />
 
               {editingId === doc.id ? (
-                <>
-                  <Input
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    className="flex-1 h-8"
-                    onKeyDown={(e) => e.key === "Enter" && handleSaveEdit()}
-                  />
-                  <Select value={editClassification} onValueChange={setEditClassification}>
-                    <SelectTrigger className="w-32 h-8"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="essencial">Essencial</SelectItem>
-                      <SelectItem value="necessario">Necessário</SelectItem>
-                      <SelectItem value="irrelevante">Irrelevante</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Button size="sm" variant="outline" className="h-8" onClick={handleSaveEdit}>Salvar</Button>
-                  <Button size="sm" variant="ghost" className="h-8" onClick={() => setEditingId(null)}>Cancelar</Button>
-                </>
+                <div className="flex-1 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="flex-1 h-8"
+                      onKeyDown={(e) => e.key === "Enter" && handleSaveEdit()}
+                    />
+                    <Select value={editClassification} onValueChange={setEditClassification}>
+                      <SelectTrigger className="w-32 h-8"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="essencial">Essencial</SelectItem>
+                        <SelectItem value="necessario">Necessário</SelectItem>
+                        <SelectItem value="irrelevante">Irrelevante</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button size="sm" variant="outline" className="h-8" onClick={handleSaveEdit}>Salvar</Button>
+                    <Button size="sm" variant="ghost" className="h-8" onClick={() => setEditingId(null)}>Cancelar</Button>
+                  </div>
+                  {allDocTags && allDocTags.length > 0 && (
+                    <div className="flex items-center gap-1.5 flex-wrap pl-1">
+                      <Tag className="h-3 w-3 text-muted-foreground" />
+                      {allDocTags.map((tag: any) => {
+                        const isSelected = editSelectedTags.includes(tag.id);
+                        return (
+                          <span
+                            key={tag.id}
+                            onClick={() => {
+                              setEditSelectedTags(isSelected
+                                ? editSelectedTags.filter((id) => id !== tag.id)
+                                : [...editSelectedTags, tag.id]);
+                            }}
+                            className={`px-2 py-0.5 rounded-full cursor-pointer text-[10px] font-medium transition-all ${
+                              isSelected ? "ring-2 ring-offset-1" : "opacity-50 hover:opacity-100"
+                            }`}
+                            style={{ backgroundColor: tag.color || "#3b82f6", color: tag.text_color || "#ffffff" }}
+                          >
+                            {tag.name}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               ) : (
                 <>
-                  <span className="flex-1 text-sm font-medium">{doc.name}</span>
+                  <div className="flex-1 flex items-center gap-1.5">
+                    <span className="text-sm font-medium">{doc.name}</span>
+                    {getTagsForDoc(doc.id).map((a: any) => (
+                      <span
+                        key={a.id}
+                        className="px-1.5 py-0 rounded-full text-[9px] font-medium"
+                        style={{ backgroundColor: a.doc_tags?.color || "#3b82f6", color: a.doc_tags?.text_color || "#ffffff" }}
+                      >
+                        {a.doc_tags?.name}
+                      </span>
+                    ))}
+                  </div>
                   <Badge variant="outline" className={classificationColors[doc.classification]}>
                     {classificationLabels[doc.classification]}
                   </Badge>

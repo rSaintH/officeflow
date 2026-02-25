@@ -23,6 +23,7 @@ export type Database = {
           is_active: boolean
           include_in_report: boolean
           order_index: number
+          internal_observation: string | null
           created_by: string | null
           created_at: string
           updated_by: string | null
@@ -36,6 +37,7 @@ export type Database = {
           is_active?: boolean
           include_in_report?: boolean
           order_index?: number
+          internal_observation?: string | null
           created_by?: string | null
           created_at?: string
           updated_by?: string | null
@@ -49,6 +51,7 @@ export type Database = {
           is_active?: boolean
           include_in_report?: boolean
           order_index?: number
+          internal_observation?: string | null
           created_by?: string | null
           created_at?: string
           updated_by?: string | null
@@ -60,6 +63,78 @@ export type Database = {
             columns: ["client_id"]
             isOneToOne: false
             referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      doc_tags: {
+        Row: {
+          id: string
+          name: string
+          color: string | null
+          text_color: string | null
+          is_active: boolean
+          created_by: string
+          created_at: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          id?: string
+          name: string
+          color?: string | null
+          text_color?: string | null
+          is_active?: boolean
+          created_by: string
+          created_at?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          id?: string
+          name?: string
+          color?: string | null
+          text_color?: string | null
+          is_active?: boolean
+          created_by?: string
+          created_at?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
+      document_type_doc_tags: {
+        Row: {
+          id: string
+          document_type_id: string
+          doc_tag_id: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          document_type_id: string
+          doc_tag_id: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          document_type_id?: string
+          doc_tag_id?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_type_doc_tags_document_type_id_fkey"
+            columns: ["document_type_id"]
+            isOneToOne: false
+            referencedRelation: "document_types"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_type_doc_tags_doc_tag_id_fkey"
+            columns: ["doc_tag_id"]
+            isOneToOne: false
+            referencedRelation: "doc_tags"
             referencedColumns: ["id"]
           },
         ]
@@ -782,6 +857,7 @@ export type Database = {
           email: string
           full_name: string
           id: string
+          must_change_password: boolean
           sector_id: string | null
           user_id: string
         }
@@ -790,6 +866,7 @@ export type Database = {
           email?: string
           full_name?: string
           id?: string
+          must_change_password?: boolean
           sector_id?: string | null
           user_id: string
         }
@@ -798,6 +875,7 @@ export type Database = {
           email?: string
           full_name?: string
           id?: string
+          must_change_password?: boolean
           sector_id?: string | null
           user_id?: string
         }

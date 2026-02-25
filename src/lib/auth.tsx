@@ -7,10 +7,12 @@ interface AuthContextType {
   session: Session | null;
   isAdmin: boolean;
   userSectorId: string | null;
+  mustChangePassword: boolean;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signUp: (email: string, password: string, fullName: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
+  setMustChangePassword: (v: boolean) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -20,6 +22,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [userSectorId, setUserSectorId] = useState<string | null>(null);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -40,16 +43,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    const fetchUserSector = async (userId: string) => {
+    const fetchUserProfile = async (userId: string) => {
       try {
         const { data } = await supabase
           .from("profiles")
-          .select("sector_id")
+          .select("sector_id, must_change_password")
           .eq("user_id", userId)
           .maybeSingle();
-        if (isMounted) setUserSectorId(data?.sector_id ?? null);
+        if (isMounted) {
+          setUserSectorId(data?.sector_id ?? null);
+          setMustChangePassword(data?.must_change_password ?? false);
+        }
       } catch {
-        if (isMounted) setUserSectorId(null);
+        if (isMounted) {
+          setUserSectorId(null);
+          setMustChangePassword(false);
+        }
       }
     };
 
@@ -64,12 +73,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setTimeout(() => {
             if (isMounted) {
               checkAdminRole(session.user.id);
-              fetchUserSector(session.user.id);
+              fetchUserProfile(session.user.id);
             }
           }, 0);
         } else {
           setIsAdmin(false);
           setUserSectorId(null);
+          setMustChangePassword(false);
         }
       }
     );
@@ -85,7 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (session?.user) {
           await checkAdminRole(session.user.id);
-          await fetchUserSector(session.user.id);
+          await fetchUserProfile(session.user.id);
         }
       } catch (e) {
         console.error("Auth init failed:", e);
@@ -94,6 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(null);
           setIsAdmin(false);
           setUserSectorId(null);
+          setMustChangePassword(false);
         }
       } finally {
         if (isMounted) {
@@ -151,11 +162,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(null);
     setIsAdmin(false);
     setUserSectorId(null);
+    setMustChangePassword(false);
   };
 
   const contextValue = useMemo(
-    () => ({ user, session, isAdmin, userSectorId, loading, signIn, signUp, signOut }),
-    [user, session, isAdmin, userSectorId, loading]
+    () => ({ user, session, isAdmin, userSectorId, mustChangePassword, loading, signIn, signUp, signOut, setMustChangePassword }),
+    [user, session, isAdmin, userSectorId, mustChangePassword, loading]
   );
 
   return (

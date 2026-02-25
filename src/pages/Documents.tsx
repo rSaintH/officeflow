@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
@@ -34,7 +34,7 @@ function sanitizeFilename(name: string): string {
 const classificationLabels: Record<string, string> = {
   essencial: "Essencial",
   necessario: "Necessário",
-  irrelevante: "Irrelevante",
+  irrelevante: "Não necessário",
 };
 
 const classificationColors: Record<string, string> = {
@@ -44,11 +44,11 @@ const classificationColors: Record<string, string> = {
 };
 
 export default function Documents() {
-  const { user, isAdmin } = useAuth();
+  const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { data: clients, isLoading: loadingClients } = useClients();
-  const pdfRef = useRef<HTMLDivElement>(null);
+
 
   // Month selector
   const [currentDate, setCurrentDate] = useState(() => {
@@ -100,114 +100,106 @@ export default function Documents() {
   // ── PDF Generation ──
 
   const generatePdfForClient = useCallback(async (clientId: string, clientName: string): Promise<Blob | null> => {
-    try {
-      // Fetch document types
-      const { data: docTypes } = await supabase
-        .from("document_types")
-        .select("*")
-        .eq("client_id", clientId)
-        .eq("is_active", true)
-        .eq("include_in_report", true)
-        .order("order_index");
+    // Fetch document types
+    const { data: docTypes, error: docError } = await supabase
+      .from("document_types")
+      .select("*")
+      .eq("client_id", clientId)
+      .eq("is_active", true)
+      .neq("include_in_report", false)
+      .order("order_index");
 
-      if (!docTypes || docTypes.length === 0) return null;
+    if (docError) throw new Error(`Erro ao buscar documentos: ${docError.message}`);
+    if (!docTypes || docTypes.length === 0) return null;
 
-      // Fetch monthly status
-      const { data: statuses } = await supabase
-        .from("document_monthly_status")
-        .select("*")
-        .eq("client_id", clientId)
-        .eq("year_month", yearMonth);
+    // Fetch monthly status
+    const { data: statuses, error: statusError } = await supabase
+      .from("document_monthly_status")
+      .select("*")
+      .eq("client_id", clientId)
+      .eq("year_month", yearMonth);
 
-      const statusMap: Record<string, any> = {};
-      statuses?.forEach((s: any) => { statusMap[s.document_type_id] = s; });
+    if (statusError) throw new Error(`Erro ao buscar status: ${statusError.message}`);
 
-      // Filter: only missing documents (not marked or has_document=false)
-      const missingDocs = docTypes.filter((d: any) => {
-        const status = statusMap[d.id];
-        return !status || !status.has_document;
-      });
+    const statusMap: Record<string, any> = {};
+    statuses?.forEach((s: any) => { statusMap[s.document_type_id] = s; });
 
-      if (missingDocs.length === 0) return null;
+    // Filter: only missing documents (not marked or has_document=false), exclude irrelevantes
+    const missingDocs = docTypes.filter((d: any) => {
+      if (d.classification === "irrelevante") return false;
+      const status = statusMap[d.id];
+      return !status || !status.has_document;
+    });
 
-      // Build HTML for PDF
-      const monthLabel = `${monthNames[currentDate.getMonth()]} ${currentDate.getFullYear()}`;
-      const now = new Date().toLocaleString("pt-BR");
+    if (missingDocs.length === 0) return null;
 
-      const html = `
-        <div style="font-family: 'Segoe UI', Arial, sans-serif; padding: 30px; color: #1a1a1a;">
-          <div style="border-bottom: 3px solid #2563eb; padding-bottom: 16px; margin-bottom: 24px;">
-            <h1 style="margin: 0 0 4px 0; font-size: 22px; color: #1e3a5f;">Solicitação de Documentos</h1>
-            <h2 style="margin: 0 0 8px 0; font-size: 16px; font-weight: 500; color: #4b5563;">${clientName}</h2>
-            <p style="margin: 0; font-size: 12px; color: #6b7280;">Referência: <strong>${monthLabel}</strong> | Gerado em: ${now}</p>
-          </div>
+    const monthLabel = `${monthNames[currentDate.getMonth()]} ${currentDate.getFullYear()}`;
+    const now = new Date().toLocaleString("pt-BR");
 
-          <p style="font-size: 13px; color: #374151; margin-bottom: 16px;">
-            Os documentos abaixo estão <strong>pendentes de envio</strong> para o mês de referência.
-          </p>
+    // Generate PDF using jsPDF directly (no html2canvas)
+    const jsPDFModule = await import("jspdf");
+    const autoTableModule = await import("jspdf-autotable");
+    const jsPDF = jsPDFModule.default;
+    const autoTable = autoTableModule.default;
 
-          <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
-            <thead>
-              <tr style="background: #f0f4ff;">
-                <th style="text-align: left; padding: 10px 12px; border: 1px solid #d1d5db; font-weight: 600;">#</th>
-                <th style="text-align: left; padding: 10px 12px; border: 1px solid #d1d5db; font-weight: 600;">Documento</th>
-                <th style="text-align: left; padding: 10px 12px; border: 1px solid #d1d5db; font-weight: 600;">Classificação</th>
-                <th style="text-align: left; padding: 10px 12px; border: 1px solid #d1d5db; font-weight: 600;">Observação</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${missingDocs.map((d: any, i: number) => {
-                const status = statusMap[d.id];
-                const obs = status?.observation || "—";
-                const classColor = d.classification === "essencial" ? "#dc2626" : d.classification === "necessario" ? "#d97706" : "#6b7280";
-                return `
-                  <tr style="background: ${i % 2 === 0 ? "#fff" : "#fafafa"};">
-                    <td style="padding: 8px 12px; border: 1px solid #d1d5db;">${i + 1}</td>
-                    <td style="padding: 8px 12px; border: 1px solid #d1d5db; font-weight: 500;">${d.name}</td>
-                    <td style="padding: 8px 12px; border: 1px solid #d1d5db;">
-                      <span style="color: ${classColor}; font-weight: 600;">${classificationLabels[d.classification]}</span>
-                    </td>
-                    <td style="padding: 8px 12px; border: 1px solid #d1d5db; color: #4b5563;">${obs}</td>
-                  </tr>
-                `;
-              }).join("")}
-            </tbody>
-          </table>
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
-          <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #e5e7eb;">
-            <p style="font-size: 11px; color: #9ca3af; margin: 0;">
-              Total de documentos pendentes: ${missingDocs.length} | ContaOffice - Solicitação de Documentos
-            </p>
-          </div>
-        </div>
-      `;
+    // Header
+    doc.setFontSize(20);
+    doc.setTextColor(30, 58, 95);
+    doc.text("Solicitação de Documentos", 14, 22);
 
-      // Render to hidden div and generate PDF
-      const container = document.createElement("div");
-      container.innerHTML = html;
-      container.style.position = "absolute";
-      container.style.left = "-9999px";
-      container.style.top = "-9999px";
-      document.body.appendChild(container);
+    doc.setFontSize(13);
+    doc.setTextColor(75, 85, 99);
+    doc.text(clientName, 14, 30);
 
-      const html2pdf = (await import("html2pdf.js")).default;
-      const blob = await html2pdf()
-        .set({
-          margin: [10, 10, 10, 10],
-          filename: `Documentos_${sanitizeFilename(clientName)}_${yearMonth}.pdf`,
-          image: { type: "jpeg", quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true },
-          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-        })
-        .from(container)
-        .outputPdf("blob");
+    doc.setFontSize(10);
+    doc.setTextColor(107, 114, 128);
+    doc.text(`Referência: ${monthLabel}  |  Gerado em: ${now}`, 14, 37);
 
-      document.body.removeChild(container);
-      return blob as Blob;
-    } catch (err: any) {
-      console.error("PDF generation error:", err);
-      return null;
-    }
+    // Blue line under header
+    doc.setDrawColor(37, 99, 235);
+    doc.setLineWidth(0.8);
+    doc.line(14, 40, 196, 40);
+
+    // Subtitle
+    doc.setFontSize(11);
+    doc.setTextColor(55, 65, 81);
+    doc.text("Os documentos abaixo estão pendentes de envio para o mês de referência.", 14, 48);
+
+    // Table data
+    const tableBody = missingDocs.map((d: any, i: number) => {
+      const status = statusMap[d.id];
+      const obs = status?.observation || "\u2014";
+      return [String(i + 1), d.name, obs];
+    });
+
+    // Use autoTable (call as standalone function, not prototype method)
+    autoTable(doc, {
+      startY: 53,
+      head: [["#", "Documento", "Observação"]],
+      body: tableBody,
+      styles: { fontSize: 10, cellPadding: 3, lineColor: [209, 213, 219], lineWidth: 0.2 },
+      headStyles: { fillColor: [240, 244, 255], textColor: [30, 58, 95], fontStyle: "bold" },
+      alternateRowStyles: { fillColor: [250, 250, 250] },
+      columnStyles: {
+        0: { cellWidth: 12, halign: "center" },
+        1: { cellWidth: 65, fontStyle: "bold" },
+        2: { cellWidth: "auto" },
+      },
+      margin: { left: 14, right: 14 },
+    });
+
+    // Footer
+    const finalY = (doc as any).lastAutoTable?.finalY || 200;
+    doc.setDrawColor(229, 231, 235);
+    doc.setLineWidth(0.3);
+    doc.line(14, finalY + 6, 196, finalY + 6);
+    doc.setFontSize(8);
+    doc.setTextColor(156, 163, 175);
+    doc.text(`Total de documentos pendentes: ${missingDocs.length}  |  ContaOffice - Solicitação de Documentos`, 14, finalY + 12);
+
+    return doc.output("blob");
   }, [yearMonth, currentDate]);
 
   const handleGeneratePdf = async () => {
@@ -439,11 +431,9 @@ export default function Documents() {
                   )}
                 </div>
                 <div className="flex gap-2">
-                  {isAdmin && (
-                    <Button variant="outline" size="sm" onClick={() => setShowTypeManager(true)}>
-                      <Settings2 className="h-4 w-4 mr-1" /> Gerenciar Documentos
-                    </Button>
-                  )}
+                  <Button variant="outline" size="sm" onClick={() => setShowTypeManager(true)}>
+                    <Settings2 className="h-4 w-4 mr-1" /> Gerenciar Documentos
+                  </Button>
                   <Button
                     size="sm"
                     onClick={handleGeneratePdf}
@@ -543,8 +533,6 @@ export default function Documents() {
         </DialogContent>
       </Dialog>
 
-      {/* Hidden div for PDF rendering */}
-      <div ref={pdfRef} style={{ position: "absolute", left: "-9999px", top: "-9999px" }} />
     </div>
   );
 }
