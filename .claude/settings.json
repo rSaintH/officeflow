@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs grep -l \"document\")",
+      "Bash(xargs grep -l \"CREATE TABLE.*tags\")",
+      "Bash(grep -l \"sector_id\" supabase/migrations/*.sql)",
+      "Bash(grep -l \"sector_id\" \"c:\\\\Users\\\\mathe\\\\Downloads\\\\Office Flow \\(3\\)/supabase/migrations/\"*.sql)"
+    ]
+  }
+}

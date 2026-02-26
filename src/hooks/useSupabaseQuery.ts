@@ -608,6 +608,39 @@ export function useDocumentTypeDocTags(documentTypeIds: string[]) {
   });
 }
 
+// ── Management / Gerência hooks ──
+
+export function useManagementConfig() {
+  return useQuery({
+    queryKey: ["management_config"],
+    staleTime: STALE_5MIN,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("management_config" as any)
+        .select("*");
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+}
+
+export function useManagementReviews(yearMonths: string[]) {
+  return useQuery({
+    queryKey: ["management_reviews", yearMonths],
+    staleTime: STALE_5MIN,
+    queryFn: async () => {
+      if (yearMonths.length === 0) return [];
+      const { data, error } = await supabase
+        .from("management_reviews" as any)
+        .select("*")
+        .in("year_month", yearMonths);
+      if (error) throw error;
+      return data as any[];
+    },
+    enabled: yearMonths.length > 0,
+  });
+}
+
 export function useClientTags(clientId: string) {
   return useQuery({
     queryKey: ["client_tags", clientId],

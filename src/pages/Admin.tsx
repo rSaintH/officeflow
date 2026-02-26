@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "@/lib/auth";
-import { useSectors, useSections, useProfiles, useSectorStyles, useTags, useDocTags, usePermissionSettings } from "@/hooks/useSupabaseQuery";
+import { useSectors, useSections, useProfiles, useSectorStyles, useTags, useDocTags, usePermissionSettings, useManagementConfig } from "@/hooks/useSupabaseQuery";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { Navigate } from "react-router-dom";
@@ -12,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Plus, Layers, Users, Palette, Tag, UserPlus, Eye, EyeOff, Settings2, Upload, FileText, Pencil, Key, Check, X, Shield } from "lucide-react";
+import { Plus, Layers, Users, Palette, Tag, UserPlus, Eye, EyeOff, Settings2, Upload, FileText, Pencil, Key, Check, X, Shield, ShieldCheck } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import ParametersAdmin from "@/components/ParametersAdmin";
@@ -40,6 +40,9 @@ export default function Admin() {
           <TabsTrigger value="import" className="gap-1"><Upload className="h-3 w-3" /> Importar CSV</TabsTrigger>
           <TabsTrigger value="users" className="gap-1"><Users className="h-3 w-3" /> Usuários</TabsTrigger>
           {!isSupervisor && (
+            <TabsTrigger value="management" className="gap-1"><ShieldCheck className="h-3 w-3" /> Gerência</TabsTrigger>
+          )}
+          {!isSupervisor && (
             <TabsTrigger value="permissions" className="gap-1"><Shield className="h-3 w-3" /> Permissões</TabsTrigger>
           )}
         </TabsList>
@@ -50,6 +53,9 @@ export default function Admin() {
         <TabsContent value="parameters" className="mt-4"><ParametersAdmin /></TabsContent>
         <TabsContent value="import" className="mt-4"><ClientCsvImport /></TabsContent>
         <TabsContent value="users" className="mt-4"><UsersAdmin readOnly={isSupervisor} /></TabsContent>
+        {!isSupervisor && (
+          <TabsContent value="management" className="mt-4"><ManagementAdmin /></TabsContent>
+        )}
         {!isSupervisor && (
           <TabsContent value="permissions" className="mt-4"><PermissionsAdmin /></TabsContent>
         )}
@@ -803,7 +809,112 @@ function DocTagsAdmin() {
   );
 }
 
-const PERMISSION_CONFIG: Record<string, { label: string; description: string; type: "roles" | "switch" }> = {
+// ── Management Config (Gerência) ──
+
+function ManagementAdmin() {
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const { data: profiles } = useProfiles();
+  const { data: config, isLoading } = useManagementConfig();
+  const [saving, setSaving] = useState(false);
+
+  const reviewer1 = config?.find((c: any) => c.key === "reviewer_1")?.user_id || "";
+  const reviewer2 = config?.find((c: any) => c.key === "reviewer_2")?.user_id || "";
+
+  const handleSave = async (key: string, userId: string) => {
+    if (!userId) return;
+    setSaving(true);
+    try {
+      const existing = config?.find((c: any) => c.key === key);
+      if (existing) {
+        const { error } = await supabase
+          .from("management_config" as any)
+          .update({ user_id: userId, updated_by: user?.id, updated_at: new Date().toISOString() })
+          .eq("key", key);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from("management_config" as any)
+          .insert({ key, user_id: userId, updated_by: user?.id });
+        if (error) throw error;
+      }
+      queryClient.invalidateQueries({ queryKey: ["management_config"] });
+      toast({ title: "Conferente atualizado!" });
+    } catch (err: any) {
+      toast({ title: "Erro", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (isLoading) return <div className="text-sm text-muted-foreground py-4">Carregando...</div>;
+
+  const userOptions = profiles?.filter((p: any) => p.user_id) || [];
+
+  return (
+    <div className="space-y-4 max-w-lg">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4" />
+            Conferentes da Gerência
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            Defina os dois conferentes que poderão marcar as checkboxes na aba Gerência.
+            Cada conferente só poderá marcar a checkbox que lhe foi atribuída.
+          </p>
+
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium">Conferente 1</Label>
+              <Select
+                value={reviewer1}
+                onValueChange={(v) => handleSave("reviewer_1", v)}
+                disabled={saving}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecionar usuário..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {userOptions.map((p: any) => (
+                    <SelectItem key={p.user_id} value={p.user_id}>
+                      {p.full_name || p.email}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium">Conferente 2</Label>
+              <Select
+                value={reviewer2}
+                onValueChange={(v) => handleSave("reviewer_2", v)}
+                disabled={saving}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecionar usuário..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {userOptions.map((p: any) => (
+                    <SelectItem key={p.user_id} value={p.user_id}>
+                      {p.full_name || p.email}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+const PERMISSION_CONFIG: Record<string, { label: string; description: string; type: "roles" | "switch" | "sectors" }> = {
   restrict_collaborator_sectors: {
     label: "Restringir colaboradores ao próprio setor",
     description: "Quando ativado, colaboradores são redirecionados diretamente ao seu setor ao acessar um cliente, sem poder acessar outros setores.",
@@ -812,6 +923,16 @@ const PERMISSION_CONFIG: Record<string, { label: string; description: string; ty
   reinf_fill_profits: {
     label: "Preencher lucros na EFD-REINF",
     description: "Selecione quais cargos podem preencher os lucros na EFD-REINF:",
+    type: "roles",
+  },
+  view_accounting_ready: {
+    label: "Acesso à aba Contabilidades Prontas",
+    description: "Selecione quais setores podem visualizar a aba Contabilidades Prontas:",
+    type: "sectors",
+  },
+  view_management: {
+    label: "Acesso à aba Gerência",
+    description: "Selecione quais cargos podem visualizar a aba Gerência:",
     type: "roles",
   },
 };
@@ -829,6 +950,7 @@ function PermissionsAdmin() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { data: permissions, isLoading } = usePermissionSettings();
+  const { data: sectors } = useSectors();
   const [saving, setSaving] = useState<Record<string, boolean>>({});
 
   const toggleRole = async (permKey: string, role: string) => {
@@ -844,6 +966,30 @@ function PermissionsAdmin() {
       const { error } = await supabase
         .from("permission_settings")
         .update({ allowed_roles: newRoles, updated_by: user?.id })
+        .eq("key", permKey);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ["permission_settings"] });
+      toast({ title: "Permissão atualizada!" });
+    } catch (err: any) {
+      toast({ title: "Erro", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving((prev) => ({ ...prev, [permKey]: false }));
+    }
+  };
+
+  const toggleSector = async (permKey: string, sectorId: string) => {
+    const perm = permissions?.find((p: any) => p.key === permKey);
+    if (!perm) return;
+    const currentSectors: string[] = perm.allowed_sectors || [];
+    const newSectors = currentSectors.includes(sectorId)
+      ? currentSectors.filter((s: string) => s !== sectorId)
+      : [...currentSectors, sectorId];
+
+    setSaving((prev) => ({ ...prev, [permKey]: true }));
+    try {
+      const { error } = await supabase
+        .from("permission_settings")
+        .update({ allowed_sectors: newSectors, updated_by: user?.id })
         .eq("key", permKey);
       if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ["permission_settings"] });
@@ -878,50 +1024,59 @@ function PermissionsAdmin() {
   const orderedKeys = Object.keys(PERMISSION_CONFIG);
 
   return (
-    <div className="space-y-4">
+    <div className="border rounded-lg divide-y">
       {orderedKeys.map((key) => {
         const config = PERMISSION_CONFIG[key];
-        const perm = permissions?.find((p: any) => p.key === key);
+        const perm: any = permissions?.find((p: any) => p.key === key);
         if (!perm) return null;
 
         return (
-          <Card key={perm.id}>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Shield className="h-4 w-4" />
-                {config.label}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-xs text-muted-foreground mb-3">{config.description}</p>
+          <div key={perm.id} className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6 px-4 py-3">
+            <div className="sm:w-[280px] shrink-0">
+              <p className="text-sm font-medium">{config.label}</p>
+              <p className="text-[11px] text-muted-foreground">{config.description}</p>
+            </div>
+            <div className="flex-1">
               {config.type === "switch" ? (
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
                   <Switch
                     checked={perm.enabled ?? false}
                     onCheckedChange={() => toggleSwitch(key, perm.enabled ?? false)}
                     disabled={saving[key]}
                   />
-                  <span className="text-sm">{perm.enabled ? "Ativado" : "Desativado"}</span>
+                  <span className="text-xs text-muted-foreground">{perm.enabled ? "Ativado" : "Desativado"}</span>
+                </div>
+              ) : config.type === "sectors" ? (
+                <div className="flex flex-wrap items-center gap-3">
+                  {(sectors || []).map((sector: any) => (
+                    <label key={sector.id} className="flex items-center gap-1.5 cursor-pointer">
+                      <Checkbox
+                        checked={(perm.allowed_sectors || []).includes(sector.id)}
+                        onCheckedChange={() => toggleSector(key, sector.id)}
+                        disabled={saving[key]}
+                        className="h-3.5 w-3.5"
+                      />
+                      <span className="text-xs">{sector.name}</span>
+                    </label>
+                  ))}
                 </div>
               ) : (
-                <div className="flex items-center gap-6">
+                <div className="flex items-center gap-4">
                   {ALL_ROLES.map((role) => (
-                    <div key={role} className="flex items-center gap-2">
+                    <label key={role} className="flex items-center gap-1.5 cursor-pointer">
                       <Checkbox
-                        id={`perm-${key}-${role}`}
                         checked={(perm.allowed_roles || []).includes(role)}
                         onCheckedChange={() => toggleRole(key, role)}
                         disabled={saving[key]}
+                        className="h-3.5 w-3.5"
                       />
-                      <Label htmlFor={`perm-${key}-${role}`} className="text-sm cursor-pointer">
-                        {ROLE_LABELS[role] || role}
-                      </Label>
-                    </div>
+                      <span className="text-xs">{ROLE_LABELS[role] || role}</span>
+                    </label>
                   ))}
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         );
       })}
       {!permissions?.length && (

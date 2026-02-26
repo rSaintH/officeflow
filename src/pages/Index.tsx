@@ -1,4 +1,8 @@
 import { useState, useMemo, memo } from "react";
+import { Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/lib/auth";
 import {
   useClients,
   useClientPops,
@@ -6,6 +10,7 @@ import {
   useTasks,
   useOccurrences,
   useSectors,
+  useProfiles,
 } from "@/hooks/useSupabaseQuery";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -18,10 +23,406 @@ import {
   ClipboardList,
   MessageSquare,
   Building2,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  ArrowRight,
+  TrendingUp,
 } from "lucide-react";
 import { format, isPast, isToday } from "date-fns";
 
+// ── Helpers ──
+
+function getGreeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return "Bom dia";
+  if (h < 18) return "Boa tarde";
+  return "Boa noite";
+}
+
+function formatYearMonth(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+const monthNames = [
+  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+];
+
+// ── Dashboard Section (supervisão + admin) ──
+
+function DashboardSection({ userSectorId }: { userSectorId: string | null }) {
+  const { data: clients } = useClients();
+  const { data: allTasks } = useTasks({});
+
+  const now = new Date();
+  const yearMonth = formatYearMonth(now);
+
+  const { data: allDocTypes } = useQuery({
+    queryKey: ["all_document_types_active"],
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("document_types")
+        .select("id, client_id, name, classification, is_active")
+        .eq("is_active", true)
+        .order("order_index");
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const { data: allMonthlyStatus } = useQuery({
+    queryKey: ["all_document_monthly_status", yearMonth],
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("document_monthly_status")
+        .select("document_type_id, client_id, has_document")
+        .eq("year_month", yearMonth);
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  // Task stats
+  const taskStats = useMemo(() => {
+    if (!allTasks) return { total: 0, overdue: 0, openToday: 0 };
+    const open = allTasks.filter((t: any) => !["Concluída", "Cancelada"].includes(t.status));
+    const overdue = open.filter(
+      (t: any) => t.due_date && isPast(new Date(t.due_date)) && !isToday(new Date(t.due_date))
+    );
+    const today = open.filter((t: any) => t.due_date && isToday(new Date(t.due_date)));
+    return { total: open.length, overdue: overdue.length, openToday: today.length };
+  }, [allTasks]);
+
+  // Overdue tasks (top 5)
+  const overdueTasks = useMemo(() => {
+    if (!allTasks) return [];
+    return allTasks
+      .filter(
+        (t: any) =>
+          !["Concluída", "Cancelada"].includes(t.status) &&
+          t.due_date &&
+          isPast(new Date(t.due_date)) &&
+          !isToday(new Date(t.due_date))
+      )
+      .sort((a: any, b: any) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime())
+      .slice(0, 5);
+  }, [allTasks]);
+
+  // Accounting status per client
+  const accountingStats = useMemo(() => {
+    if (!clients || !allDocTypes || !allMonthlyStatus) return { green: 0, yellow: 0, red: 0, topRed: [] as any[] };
+
+    const docTypesByClient: Record<string, typeof allDocTypes> = {};
+    for (const dt of allDocTypes) {
+      if (!docTypesByClient[dt.client_id]) docTypesByClient[dt.client_id] = [];
+      docTypesByClient[dt.client_id].push(dt);
+    }
+
+    const statusByDocType: Record<string, boolean> = {};
+    for (const s of allMonthlyStatus) {
+      statusByDocType[s.document_type_id] = s.has_document;
+    }
+
+    let green = 0, yellow = 0, red = 0;
+    const redClients: { name: string; missing: number }[] = [];
+
+    const activeClients = clients.filter((c: any) => c.status === "Ativo");
+    for (const client of activeClients) {
+      const docTypes = docTypesByClient[client.id] || [];
+      const essential = docTypes.filter((d) => d.classification === "essencial");
+      const necessary = docTypes.filter((d) => d.classification === "necessario");
+
+      const essentialReceived = essential.filter((d) => statusByDocType[d.id] === true).length;
+      const necessaryReceived = necessary.filter((d) => statusByDocType[d.id] === true).length;
+
+      const allEssential = essential.length === 0 || essentialReceived === essential.length;
+      const allNecessary = necessary.length === 0 || necessaryReceived === necessary.length;
+
+      if (allEssential && allNecessary) {
+        green++;
+      } else if (allEssential) {
+        yellow++;
+      } else {
+        red++;
+        redClients.push({
+          name: (client as any).legal_name,
+          missing: essential.length - essentialReceived,
+        });
+      }
+    }
+
+    redClients.sort((a, b) => b.missing - a.missing);
+
+    return { green, yellow, red, topRed: redClients.slice(0, 5) };
+  }, [clients, allDocTypes, allMonthlyStatus]);
+
+  const activeClientsCount = clients?.filter((c: any) => c.status === "Ativo").length ?? 0;
+
+  return (
+    <div className="space-y-4">
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <Card>
+          <CardContent className="pt-4 pb-3 px-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-muted-foreground font-medium">Pendências Abertas</p>
+                <p className="text-2xl font-bold mt-1">{taskStats.total}</p>
+              </div>
+              <ClipboardList className="h-8 w-8 text-muted-foreground/30" />
+            </div>
+            {taskStats.overdue > 0 && (
+              <p className="text-xs text-destructive font-medium mt-1">
+                {taskStats.overdue} vencida(s)
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-4 pb-3 px-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-muted-foreground font-medium">Vencem Hoje</p>
+                <p className="text-2xl font-bold mt-1">{taskStats.openToday}</p>
+              </div>
+              <Clock className="h-8 w-8 text-muted-foreground/30" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-4 pb-3 px-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-muted-foreground font-medium">Contabilidades</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-sm font-semibold text-green-600 dark:text-green-400">{accountingStats.green}</span>
+                  <span className="text-muted-foreground/50">/</span>
+                  <span className="text-sm font-semibold text-yellow-600 dark:text-yellow-400">{accountingStats.yellow}</span>
+                  <span className="text-muted-foreground/50">/</span>
+                  <span className="text-sm font-semibold text-red-600 dark:text-red-400">{accountingStats.red}</span>
+                </div>
+              </div>
+              <TrendingUp className="h-8 w-8 text-muted-foreground/30" />
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              {monthNames[now.getMonth()]} {now.getFullYear()}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-4 pb-3 px-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-muted-foreground font-medium">Clientes Ativos</p>
+                <p className="text-2xl font-bold mt-1">{activeClientsCount}</p>
+              </div>
+              <Building2 className="h-8 w-8 text-muted-foreground/30" />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Attention section: overdue tasks + red clients */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        {/* Overdue tasks */}
+        <Card>
+          <CardHeader className="pb-2 pt-4 px-4">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-destructive" />
+              Pendências Vencidas
+              {taskStats.overdue > 0 && (
+                <Badge variant="destructive" className="text-[10px] ml-auto">{taskStats.overdue}</Badge>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-3">
+            {overdueTasks.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-2">Nenhuma pendência vencida.</p>
+            ) : (
+              <div className="space-y-0">
+                {overdueTasks.map((t: any) => (
+                  <div key={t.id} className="flex items-start justify-between gap-2 py-2 border-b last:border-0">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium truncate">{t.title}</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {t.clients?.legal_name || t.clients?.trade_name || "—"}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Badge variant="destructive" className="text-[10px]">{t.status}</Badge>
+                      <span className="text-[11px] text-destructive font-medium">
+                        {format(new Date(t.due_date), "dd/MM")}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+                {taskStats.overdue > 5 && (
+                  <Link
+                    to="/tasks"
+                    className="flex items-center gap-1 text-xs text-primary hover:underline pt-2"
+                  >
+                    Ver todas ({taskStats.overdue}) <ArrowRight className="h-3 w-3" />
+                  </Link>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Red clients - docs missing */}
+        <Card>
+          <CardHeader className="pb-2 pt-4 px-4">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <XCircle className="h-4 w-4 text-red-500" />
+              Empresas com Docs Essenciais Faltando
+              {accountingStats.red > 0 && (
+                <Badge variant="outline" className="text-[10px] ml-auto bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300">
+                  {accountingStats.red}
+                </Badge>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-3">
+            {accountingStats.topRed.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-2">
+                <CheckCircle2 className="h-3.5 w-3.5 inline mr-1 text-green-500" />
+                Todas as empresas com essenciais em dia.
+              </p>
+            ) : (
+              <div className="space-y-0">
+                {accountingStats.topRed.map((c, i) => (
+                  <div key={i} className="flex items-center justify-between py-2 border-b last:border-0">
+                    <p className="text-sm font-medium truncate flex-1 min-w-0">{c.name}</p>
+                    <Badge variant="outline" className="text-[10px] shrink-0 bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300">
+                      {c.missing} essencial(is)
+                    </Badge>
+                  </div>
+                ))}
+                {accountingStats.red > 5 && (
+                  <Link
+                    to="/accounting-ready"
+                    className="flex items-center gap-1 text-xs text-primary hover:underline pt-2"
+                  >
+                    Ver todas ({accountingStats.red}) <ArrowRight className="h-3 w-3" />
+                  </Link>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+// ── Colaborador section: own sector overdue tasks ──
+
+function ColaboradorSection({ userSectorId }: { userSectorId: string | null }) {
+  const { data: allTasks } = useTasks({ sectorId: userSectorId ?? undefined });
+  const { data: sectors } = useSectors();
+
+  const sectorName = sectors?.find((s: any) => s.id === userSectorId)?.name ?? "Seu setor";
+
+  const overdueTasks = useMemo(() => {
+    if (!allTasks) return [];
+    return allTasks
+      .filter(
+        (t: any) =>
+          !["Concluída", "Cancelada"].includes(t.status) &&
+          t.due_date &&
+          isPast(new Date(t.due_date)) &&
+          !isToday(new Date(t.due_date))
+      )
+      .sort((a: any, b: any) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime())
+      .slice(0, 5);
+  }, [allTasks]);
+
+  const openTasks = useMemo(() => {
+    if (!allTasks) return [];
+    return allTasks.filter((t: any) => !["Concluída", "Cancelada"].includes(t.status));
+  }, [allTasks]);
+
+  const todayTasks = useMemo(() => {
+    return openTasks.filter((t: any) => t.due_date && isToday(new Date(t.due_date)));
+  }, [openTasks]);
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3 max-w-lg">
+        <Card>
+          <CardContent className="pt-4 pb-3 px-4">
+            <p className="text-xs text-muted-foreground font-medium">Pendências ({sectorName})</p>
+            <p className="text-2xl font-bold mt-1">{openTasks.length}</p>
+            {overdueTasks.length > 0 && (
+              <p className="text-xs text-destructive font-medium mt-1">{overdueTasks.length} vencida(s)</p>
+            )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4 pb-3 px-4">
+            <p className="text-xs text-muted-foreground font-medium">Vencem Hoje</p>
+            <p className="text-2xl font-bold mt-1">{todayTasks.length}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {overdueTasks.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2 pt-4 px-4">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-destructive" />
+              Pendências Vencidas
+              <Badge variant="destructive" className="text-[10px] ml-auto">{overdueTasks.length}</Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-3">
+            {overdueTasks.map((t: any) => (
+              <div key={t.id} className="flex items-start justify-between gap-2 py-2 border-b last:border-0">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium truncate">{t.title}</p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {t.clients?.legal_name || t.clients?.trade_name || "—"}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Badge variant="destructive" className="text-[10px]">{t.status}</Badge>
+                  <span className="text-[11px] text-destructive font-medium">
+                    {format(new Date(t.due_date), "dd/MM")}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ── Main Page ──
+
 export default function Index() {
+  const { user, isAdmin, userRole, userSectorId } = useAuth();
+  const { data: profiles } = useProfiles();
+
+  const isSupervisor = userRole === "supervisao" || userRole === "supervisão";
+  const canSeeDashboard = isAdmin || isSupervisor;
+
+  // Get user's full name from profiles
+  const userName = useMemo(() => {
+    if (!profiles || !user) return null;
+    const profile = profiles.find((p: any) => p.user_id === user.id);
+    if (!profile) return null;
+    const name = (profile as any).full_name as string | undefined;
+    return name?.split(" ")[0] ?? null; // First name only
+  }, [profiles, user]);
+
   const [search, setSearch] = useState("");
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [showResults, setShowResults] = useState(false);
@@ -77,9 +478,28 @@ export default function Index() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {/* Greeting */}
       <div>
-        <h1 className="text-2xl font-bold">Área de Trabalho</h1>
+        <h1 className="text-2xl font-bold">
+          {getGreeting()}{userName ? `, ${userName}` : ""}!
+        </h1>
         <p className="text-muted-foreground text-sm mt-1">
+          {canSeeDashboard
+            ? "Visão geral do escritório"
+            : "Sua área de trabalho"}
+        </p>
+      </div>
+
+      {/* Dashboard for admin/supervisor */}
+      {canSeeDashboard && <DashboardSection userSectorId={userSectorId} />}
+
+      {/* Colaborador: own sector stats */}
+      {!canSeeDashboard && <ColaboradorSection userSectorId={userSectorId} />}
+
+      {/* Divider */}
+      <div className="border-t pt-4">
+        <h2 className="text-lg font-semibold mb-3">Área de Trabalho</h2>
+        <p className="text-muted-foreground text-sm mb-3">
           Selecione um cliente para visualizar informações por setor
         </p>
       </div>
@@ -163,11 +583,6 @@ export default function Index() {
           <TabsList className="w-full justify-start flex-wrap h-auto gap-1 bg-muted/50 p-1">
             {sectors.map((s) => {
               const sd = sectorData.find((d) => d.sector.id === s.id);
-              const totalItems =
-                (sd?.tasks.length ?? 0) +
-                (sd?.particularities.length ?? 0) +
-                (sd?.pops.length ?? 0) +
-                (sd?.occurrences.length ?? 0);
               const overdueCount = sd?.tasks.filter(
                 (t: any) => t.due_date && isPast(new Date(t.due_date)) && !isToday(new Date(t.due_date))
               ).length ?? 0;

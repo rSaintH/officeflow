@@ -20,6 +20,8 @@ const Admin = lazy(() => import("@/pages/Admin"));
 const Reinf = lazy(() => import("@/pages/Reinf"));
 const PopView = lazy(() => import("@/pages/PopView"));
 const Documents = lazy(() => import("@/pages/Documents"));
+const AccountingReady = lazy(() => import("@/pages/AccountingReady"));
+const Management = lazy(() => import("@/pages/Management"));
 const Customization = lazy(() => import("@/pages/Customization"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 
@@ -81,6 +83,8 @@ const App = () => (
               <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
               <Route path="/reinf" element={<ProtectedRoute><Reinf /></ProtectedRoute>} />
               <Route path="/documents" element={<ProtectedRoute><Documents /></ProtectedRoute>} />
+              <Route path="/accounting-ready" element={<ProtectedRoute><AccountingReady /></ProtectedRoute>} />
+              <Route path="/management" element={<ProtectedRoute><Management /></ProtectedRoute>} />
               <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
               <Route path="/pops/:popId" element={<ProtectedRoute><PopView /></ProtectedRoute>} />
               <Route path="/customization" element={<ProtectedRoute><Customization /></ProtectedRoute>} />

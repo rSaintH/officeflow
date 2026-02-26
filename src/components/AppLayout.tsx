@@ -1,6 +1,7 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useState, useMemo } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
+import { usePermissionSettings } from "@/hooks/useSupabaseQuery";
 import { useTheme } from "@/contexts/ThemeContext";
 import {
   Building2,
@@ -10,6 +11,8 @@ import {
   ClipboardList,
   FileSpreadsheet,
   FolderSearch,
+  ClipboardCheck,
+  ShieldCheck,
   Settings,
   LogOut,
   Menu,
@@ -25,12 +28,14 @@ import gremioLogo from "@/assets/gremio-logo.png";
 import renatoGauchoImage from "@/assets/renato-gaucho.jpeg";
 
 const navItems = [
-  { path: "/", label: "Início", icon: Home },
-  { path: "/clients", label: "Clientes", icon: Users },
-  { path: "/pops", label: "POPs", icon: FileText },
-  { path: "/tasks", label: "Pendências", icon: ClipboardList },
-  { path: "/reinf", label: "EFD-REINF", icon: FileSpreadsheet },
-  { path: "/documents", label: "Documentos", icon: FolderSearch },
+  { path: "/", label: "Início", icon: Home, permKey: null },
+  { path: "/clients", label: "Clientes", icon: Users, permKey: null },
+  { path: "/pops", label: "POPs", icon: FileText, permKey: null },
+  { path: "/tasks", label: "Pendências", icon: ClipboardList, permKey: null },
+  { path: "/reinf", label: "EFD-REINF", icon: FileSpreadsheet, permKey: null },
+  { path: "/documents", label: "Documentos", icon: FolderSearch, permKey: null },
+  { path: "/accounting-ready", label: "Contabilidades Prontas", icon: ClipboardCheck, permKey: "view_accounting_ready" },
+  { path: "/management", label: "Gerência", icon: ShieldCheck, permKey: "view_management" },
 ];
 
 const adminItems = [
@@ -38,8 +43,9 @@ const adminItems = [
 ];
 
 export default function AppLayout({ children }: { children: ReactNode }) {
-  const { user, isAdmin, userRole, signOut } = useAuth();
+  const { user, isAdmin, userRole, userSectorId, signOut } = useAuth();
   const { easterEggUnlocked, palette, paletteActive } = useTheme();
+  const { data: permissions } = usePermissionSettings();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -59,12 +65,31 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   };
 
   const easterEggItems = easterEggUnlocked
-    ? [{ path: "/customization", label: "Customização", icon: Sparkles }]
+    ? [{ path: "/customization", label: "Customização", icon: Sparkles, permKey: null }]
     : [];
 
   const isSupervisor = userRole === "supervisao" || userRole === "supervisão";
   const canAccessAdmin = isAdmin || isSupervisor;
-  const allItems = [...navItems, ...(canAccessAdmin ? adminItems : []), ...easterEggItems];
+
+  // Filter nav items by permission settings
+  const visibleNavItems = useMemo(() => {
+    return navItems.filter((item) => {
+      if (!item.permKey) return true;
+      if (isAdmin) return true;
+      const perm: any = permissions?.find((p: any) => p.key === item.permKey);
+      if (!perm) return true;
+      // Sector-based permission (only restricts colaboradores)
+      if (perm.allowed_sectors && perm.allowed_sectors.length > 0) {
+        if (isSupervisor) return true;
+        return userSectorId ? perm.allowed_sectors.includes(userSectorId) : false;
+      }
+      // Role-based permission
+      const allowedRoles: string[] = perm.allowed_roles || [];
+      return allowedRoles.includes(userRole);
+    });
+  }, [permissions, userRole, userSectorId, isAdmin]);
+
+  const allItems = [...visibleNavItems, ...(canAccessAdmin ? adminItems : []), ...easterEggItems];
 
   return (
     <div className="flex h-screen overflow-hidden">
